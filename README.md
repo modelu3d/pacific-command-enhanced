@@ -1,4 +1,4 @@
-# Pacific Command Enhanced — Game Modes v0.4
+# Pacific Command Enhanced — Game Modes v0.4.1
 
 An **unofficial, independent playtest companion** for *Pacific Command*. The app imports JSON exported by the [original Type37/WarLore Fleet Builder](https://type37.github.io/pacific-command-builder/); no original builder code is embedded.
 
@@ -7,7 +7,7 @@ An **unofficial, independent playtest companion** for *Pacific Command*. The app
 | URL | Ship combat | Aircraft operations |
 | --- | --- | --- |
 | `/original/` | Published sinking, hit allocation and Armoured thresholds | Original pooled CAP/Strike strength, no new readiness or permanent-loss rules |
-| `/aircraft/` | Published ship rules | Per-carrier CAP, Escort, Strike; readiness cycles; 5–6 permanent-loss checks |
+| `/aircraft/` | Original hit allocation; **house rule: confirmed hits accumulate against armour across attacks** | Per-carrier CAP, Escort, Strike; readiness cycles; 5–6 permanent-loss checks |
 | `/experimental/` | v0.3's *experimental* cumulative hull damage, knockouts and Hangar Fire | Same enhanced aircraft operations |
 
 At the root URL, choose a mode. Each stores its own browser save under a distinct key and exports backups tagged with its mode. Cross-mode battle-backup imports are blocked to avoid applying the wrong rules. **Import the same original Fleet Builder JSON independently into each mode** to compare game types.
@@ -23,7 +23,7 @@ Use the *Match model* button to edit these. The Fleet Builder export includes sh
 
 ### Original ship-hit workflow
 
-Choose **Record attack hits** on the defending task force, enter the dice counts (confirmed 6; unconfirmed 4–5), then assign hits against rows. Confirmed hits are assigned by the attacker and unconfirmed hits by the defender, including to destroyers. Armoured vessels require the published number of confirmed hits within that attack; one unconfirmed hit sinks an eligible ship. A destroyed vessel stops contributing Guns and AA. Original naval modifiers, especially class-selected Improved Armour and Torpedo Belts, should be adjudicated from your rulebook; the prototype does not infer class selections from insufficient export data.
+Choose **Record attack hits** on the defending task force, enter the dice counts (confirmed 6; unconfirmed 4–5), then assign hits against rows. Confirmed hits are assigned by the attacker and unconfirmed hits by the defender, including to destroyers. In **Original** mode, armoured vessels require the published number of confirmed hits in one attack. In **Enhanced Aircraft**, each confirmed hit reduces a ship's armour by 1, persistent across attacks (e.g., Armoured (2): 2/2 → 1/2 → sunk). **One unconfirmed hit still sinks any ship**. This is a house rule, not the published game. A destroyed vessel stops contributing Guns and AA. Original naval modifiers, especially class-selected Improved Armour and Torpedo Belts, should be adjudicated from your rulebook; the prototype does not infer class selections from insufficient export data.
 
 ### Enhanced aircraft
 
