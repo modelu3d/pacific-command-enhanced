@@ -85,3 +85,6 @@
 .hit-confirm{border-color:#925d45;color:#f6ccaf;background:#3c2d2a}.hit-unconfirm{border-color:#51729a;color:#beddf9;background:#223345}
 .sunk-mark{color:#ff9c97;font-weight:800}.afloat-mark{color:#8adeb1;font-weight:750}
 @media(max-width:720px){.hit-pool-panel{align-items:flex-start;flex-direction:column}.hit-pool-panel .btn{width:100%}}
+
+/* v0.4.1 — persistent armour-hit indicator in Enhanced Aircraft */
+.armour-damaged{display:inline-block;color:#f1cb83;background:#3a3326;border:1px solid #9b7d43;border-radius:6px;padding:4px 9px;font-size:12px;font-weight:800;letter-spacing:.05em}
