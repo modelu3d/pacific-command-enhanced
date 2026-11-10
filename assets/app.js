@@ -22,9 +22,10 @@ const LABELS = {cap:'CAP',escort:'Escort',strike:'Strike'};
 const MODE = ['original','aircraft','experimental'].includes(window.PCE_MODE)?window.PCE_MODE:'experimental';
 const IS_EXPERIMENTAL = MODE==='experimental';
 const ENHANCED_AIR = MODE!=='original';
+const CUMULATIVE_ARMOUR = MODE==='aircraft'; // House rule only; published mode remains untouched.
 const MODE_INFO = {
   original:{title:'Original Rules',tag:'Published ship and aircraft mechanics'},
-  aircraft:{title:'Enhanced Aircraft',tag:'Original ship rules + enhanced carrier operations'},
+  aircraft:{title:'Enhanced Aircraft',tag:'Original hit allocation + cumulative armour + enhanced carrier operations'},
   experimental:{title:'Experimental',tag:'Cumulative ship damage and enhanced air operations'}
 };
 const STORAGE_KEY=`pce-companion-${MODE}-v04`;
@@ -89,7 +90,7 @@ function makeBattle(fleet){
       for(let si=0;si<qty;si++){
         const prefix=String(u.pennant||'').trim();
         const name=prefix?(qty>1?`${prefix} ${si+1}`:prefix):`${c.short} ${tf.ships.filter(s=>s.classId===u.classId).length+1}`;
-        const s={id:pickId(ti,ui,si),classId:u.classId,name,damage:0,sunk:false,ko:c.ko,capacity:effectiveCapacity(u.classId,mods),historicalClass:String(u.historicalClass||u.shipClass||''),modelCode:''};
+        const s={id:pickId(ti,ui,si),classId:u.classId,name,damage:0,sunk:false,armourHits:0,ko:c.ko,capacity:effectiveCapacity(u.classId,mods),historicalClass:String(u.historicalClass||u.shipClass||''),modelCode:''};
         if(c.carrier) s.air={fighters:0,bombers:0,deck:{usedRound:0,operation:''},groups:{cap:{count:0,status:'ready'},escort:{count:0,status:'ready'},strike:{count:0,status:'ready'}}};
         tf.ships.push(s);
       }
@@ -174,6 +175,7 @@ function normalizeBattle(data){
       ship.historicalClass=String(ship.historicalClass||'');
       ship.modelCode=String(ship.modelCode||'');
       if(typeof ship.sunk!=='boolean')ship.sunk=false;
+      if(CUMULATIVE_ARMOUR)ship.armourHits=number(ship.armourHits,0,baseArmour(ship.classId));
       if(!ship.air)continue;
       for(const key of GROUPS){
         const g=ship.air.groups?.[key];if(!g)continue;
@@ -365,15 +367,23 @@ function allocateOriginalHit(ti,kind,idx,hitType){
   const screen=kind==='screen'?getScreen(ti,idx):null;
   const ship=kind==='ship'?getShip(ti,idx):null;
   if(screen ? screen.remaining<=0 : !ship||isKo(ship))return;
-  const need=hitType==='confirmed' && ship?requiredConfirmed(ship,tf):1;
-  if(tf.pending[hitType]<need){notice=`${ship.name} needs ${need} confirmed hits in this attack under its Armoured rule.`;render();return;}
+  const need=hitType==='confirmed' && ship && !CUMULATIVE_ARMOUR?requiredConfirmed(ship,tf):1;
+  if(tf.pending[hitType]<need){notice=`${ship.name} needs ${need} confirmed hits in this attack under its published Armoured rule.`;render();return;}
   commit('allocate',()=>{
     tf.pending[hitType]-=need;
+    let result='sunk';
     if(screen){screen.remaining--;screen.partial=0;}
-    else {ship.sunk=true;ship.damage=ship.ko;}
+    else if(CUMULATIVE_ARMOUR && hitType==='confirmed'){
+      // One confirmed six = one persistent armour hit; a second confirmed six may finish the ship later.
+      ship.armourHits=number(ship.armourHits,0,requiredConfirmed(ship,tf))+1;
+      if(ship.armourHits>=requiredConfirmed(ship,tf)){
+        ship.armourHits=requiredConfirmed(ship,tf);
+        ship.sunk=true;ship.damage=ship.ko;
+      }else{result=`damaged — ${requiredConfirmed(ship,tf)-ship.armourHits}/${requiredConfirmed(ship,tf)} armour remaining`;}
+    }else {ship.sunk=true;ship.damage=ship.ko;}
     battle.started=true;
     const name=screen?CLASSES[screen.classId].name:ship.name;
-    return `${tf.id} ${name}: sunk by ${need} ${hitType} hit${need===1?'':'s'}. ${tf.pending.confirmed+tf.pending.unconfirmed?'More hits to assign.':'All hits assigned.'}`;
+    return `${tf.id} ${name}: ${result} by ${need} ${hitType} hit${need===1?'':'s'}. ${tf.pending.confirmed+tf.pending.unconfirmed?'More hits to assign.':'All hits assigned.'}`;
   });
 }
 function applyAttack(target,confirmed,unconfirmed){
@@ -427,11 +437,14 @@ function attack(ti,kind,idx,confirmed,unconfirmed,pending=false){
 }
 function clearPending(ti){const tf=getTF(ti);if(!tf)return;commit('discard',()=>{const n=tf.pending.confirmed+tf.pending.unconfirmed;tf.pending={confirmed:0,unconfirmed:0};return `${tf.name}: ${n} unallocated hit(s) cleared.`;});}
 function reverseDamage(ti,si){
- const s=getShip(ti,si);if(!s||(!isKo(s)&&s.damage===0))return;
+ const s=getShip(ti,si);if(!s||(!isKo(s)&&s.damage===0&&!(CUMULATIVE_ARMOUR&&s.armourHits>0)))return;
  commit('repair',()=>{
   if(IS_EXPERIMENTAL)s.damage=Math.max(0,s.damage-1);
-  else{s.sunk=false;s.damage=0;}
-  return `${s.name}: ${IS_EXPERIMENTAL?'corrected damage −1':'restored to afloat (correction)'}.`;
+  else if(CUMULATIVE_ARMOUR){
+    if(s.sunk){s.sunk=false;s.damage=0;if(s.armourHits>=requiredConfirmed(s))s.armourHits=Math.max(0,s.armourHits-1);}
+    else{s.armourHits=Math.max(0,s.armourHits-1);}
+  }else{s.sunk=false;s.damage=0;}
+  return `${s.name}: ${IS_EXPERIMENTAL?'corrected damage −1':CUMULATIVE_ARMOUR?'corrected armour / sunk status':'restored to afloat (correction)'}.`;
  });
 }
 function editModel(ti,si,screen=false){
@@ -444,7 +457,7 @@ function editModel(ti,si,screen=false){
  commit('model-match',()=>{s.historicalClass=String(className).trim().slice(0,90);s.modelCode=String(modelCode).trim().slice(0,90);return `${screen?CLASSES[s.classId].name:s.name}: model matched — ${s.historicalClass||'unspecified class'}${s.modelCode?' / '+s.modelCode:''}.`;});
 }
 function specialChips(classId){const specials=SPECIALS[classId]||[];
- return specials.length?`<div class="specials">${specials.map(x=>`<span class="special-chip ${IS_EXPERIMENTAL&&x.startsWith('Armoured')?'muted-special':''}" title="${IS_EXPERIMENTAL&&x.startsWith('Armoured')?'Superseded by cumulative hull damage in Experimental mode':escapeHtml(x)}">${escapeHtml(x)}${IS_EXPERIMENTAL&&x.startsWith('Armoured')?' (replaced)':''}</span>`).join('')}</div>`:'';
+ return specials.length?`<div class="specials">${specials.map(x=>`<span class="special-chip ${IS_EXPERIMENTAL&&x.startsWith('Armoured')?'muted-special':''}" title="${IS_EXPERIMENTAL&&x.startsWith('Armoured')?'Superseded by cumulative hull damage in Experimental mode':CUMULATIVE_ARMOUR&&x.startsWith('Armoured')?'House rule: confirmed hits accumulate across attacks; one unconfirmed hit still sinks':escapeHtml(x)}">${escapeHtml(x)}${IS_EXPERIMENTAL&&x.startsWith('Armoured')?' (replaced)':CUMULATIVE_ARMOUR&&x.startsWith('Armoured')?' · cumulative':''}</span>`).join('')}</div>`:'';
 }
 function modelLabel(s){return `<div class="shipmeta model-line">Historical class: <b>${escapeHtml(s.historicalClass||'Not set')}</b>${s.modelCode?` · Model: <b>${escapeHtml(s.modelCode)}</b>`:''}</div>`;}
 
@@ -463,26 +476,31 @@ function editScreenCount(ti,scidx,dir){
 function dismiss(){modal=null;render();}
 function vText(v){return escapeHtml(v);}
 function btn(label,action,attr='',type=''){return `<button class="btn ${type}" data-action="${action}" ${attr}>${label}</button>`;}
-function renderHeader(){return `<div class="topbar"><div class="topinner"><div class="brand"><div class="roundel">✦</div><div><div class="brandline">PACIFIC <span>COMMAND</span></div><div class="brand-sub">${escapeHtml(MODE_INFO[MODE].title)} · Battle Companion v0.4</div></div></div><div class="header-side"><span class="round">ROUND <b id="round-badge">${battle?.round||'—'}</b></span>${battle?btn('↶ Undo','undo',undoStack.length?'':'disabled','sm quiet'):''}</div></div></div>`;}
+function renderHeader(){return `<div class="topbar"><div class="topinner"><div class="brand"><div class="roundel">✦</div><div><div class="brandline">PACIFIC <span>COMMAND</span></div><div class="brand-sub">${escapeHtml(MODE_INFO[MODE].title)} · Battle Companion v0.4.1</div></div></div><div class="header-side"><span class="round">ROUND <b id="round-badge">${battle?.round||'—'}</b></span>${battle?btn('↶ Undo','undo',undoStack.length?'':'disabled','sm quiet'):''}</div></div></div>`;}
 function renderControls(){return `<div class="top-content"><div><div class="eyebrow">${battle?`${vText(battle.faction||'Fleet')} / ${vText(battle.era||'Battle')}`:'Build · Command · Record'}</div><h1>${battle?vText(battle.name):'Your fleet. One battle dashboard.'}</h1><p>${battle?`${battle.tfs.length} task forces · aircraft and ship losses tracked in one place`:'Import an existing fleet, then manage ships, aircraft and carrier states.'}</p></div><div class="tools">${battle?`${btn('↶ Undo','undo',undoStack.length?'':'disabled','sm')}${btn('⇧ Advance round','advance-round','','primary')}${btn('↓ Battle backup','export-battle','','sm')}${btn('Share / Save backup','share-battle','','sm')}`:''}</div></div><div class="modes-switch"><a href="../" class="btn sm quiet">← Game modes</a><span class="muted small">${escapeHtml(MODE_INFO[MODE].tag)}</span></div><div class="tabs">${[['builder','01  Fleet Builder'],['fleet','02  Fleet Overview'],['carriers',ENHANCED_AIR?'03  Carrier Operations':'03  Fleet Aviation'],['log','Battle Log']].map(([key,label])=>`<button class="tab ${tab===key?'active':''}" data-action="tab" data-value="${key}">${label}</button>`).join('')}</div>${notice?`<div class="callout warning" role="status">${vText(notice)} ${btn('Dismiss','dismiss-notice','','xs quiet')}</div>`:''}${!storageOk?'<div class="callout warning">Your browser is blocking local saving. Export a battle backup to preserve your changes.</div>':''}`;}
-function builderPage(){return `<div class="hero"><div class="panel"><div class="eyebrow">Step 1 / Build</div><h2>Use the existing Fleet Builder</h2><p class="muted">Keep building and validating fleets in WarLore/Type37's existing tool. Download its JSON export, then load it here as a new battle.</p><div class="flowline"><div class="stage"><b>Build</b><span>Original builder</span></div><span class="arrow">→</span><div class="stage"><b>Export JSON</b><span>Fleets menu</span></div><span class="arrow">→</span><div class="stage"><b>Import here</b><span>Start battle</span></div></div><div class="builder-actions"><a class="btn primary" target="_blank" rel="noopener noreferrer" href="https://type37.github.io/pacific-command-builder/">Open Fleet Builder ↗</a>${btn('↑ Import fleet JSON','open-fleet-file','','')}${btn('Try sample fleet','demo','','quiet')}</div><p class="note">Builder instructions: open <b>Fleet</b> → <b>Export file</b>, then choose that .json file here. This does not change the original builder.</p></div><div class="panel"><div class="eyebrow">Step 2 / Configure</div><h2>Assign aircraft to carriers</h2><p class="muted">The builder pools fighter and bomber squadrons by task force. This companion spreads them across individual carriers automatically. In enhanced modes, you can adjust those allocations before combat.</p><div class="callout">${ENHANCED_AIR?'Each carrier has fixed <b>CAP</b>, <b>Escort</b> and <b>Strike</b> groups. CAP flies for two rounds; Escort and Strike fly for one. All then refuel/rearm for one round.':'Original game aircraft mechanics remain unchanged; no new CAP/Strike cycles or permanent-loss tracking.'}</div><h3>Continue a previous game</h3><div class="builder-actions">${btn('↑ Import battle backup','open-battle-file','','')}${battle?btn('Share / Save backup','share-battle','','quiet'):''}${battle?btn('Reset from original fleet','reset-battle','','quiet'):''}</div></div></div><div class="panel" style="margin-top:16px"><div class="sectionhead"><h2>Implementation path</h2><span class="badge gray">Prototype v0.4 · ${MODE_INFO[MODE].title}</span></div><div class="guide"><div class="card"><span class="num">01 / FLEET</span><strong>Ship losses and guns / AA</strong><p>${IS_EXPERIMENTAL?'Cumulative experimental damage tracks for capital ships; destroyers are targetable.':'Original hit allocation and sinking rules; destroyers remain targetable.'}</p></div><div class="card"><span class="num">02 / AVIATION</span><strong>${ENHANCED_AIR?'Carrier readiness and losses':'Published air combat'}</strong><p>${ENHANCED_AIR?'Set aircraft allocations, launch groups, advance rounds and record permanent losses.':'Reference original CAP and Strike strength without new readiness or losses.'}</p></div><div class="card"><span class="num">03 / PROTECT</span><strong>Save / undo</strong><p>Changes auto-save in the browser where allowed; export a JSON battle backup for safety.</p></div></div></div>`;}
+function builderPage(){return `<div class="hero"><div class="panel"><div class="eyebrow">Step 1 / Build</div><h2>Use the existing Fleet Builder</h2><p class="muted">Keep building and validating fleets in WarLore/Type37's existing tool. Download its JSON export, then load it here as a new battle.</p><div class="flowline"><div class="stage"><b>Build</b><span>Original builder</span></div><span class="arrow">→</span><div class="stage"><b>Export JSON</b><span>Fleets menu</span></div><span class="arrow">→</span><div class="stage"><b>Import here</b><span>Start battle</span></div></div><div class="builder-actions"><a class="btn primary" target="_blank" rel="noopener noreferrer" href="https://type37.github.io/pacific-command-builder/">Open Fleet Builder ↗</a>${btn('↑ Import fleet JSON','open-fleet-file','','')}${btn('Try sample fleet','demo','','quiet')}</div><p class="note">Builder instructions: open <b>Fleet</b> → <b>Export file</b>, then choose that .json file here. This does not change the original builder.</p></div><div class="panel"><div class="eyebrow">Step 2 / Configure</div><h2>Assign aircraft to carriers</h2><p class="muted">The builder pools fighter and bomber squadrons by task force. This companion spreads them across individual carriers automatically. In enhanced modes, you can adjust those allocations before combat.</p><div class="callout">${ENHANCED_AIR?'Each carrier has fixed <b>CAP</b>, <b>Escort</b> and <b>Strike</b> groups. CAP flies for two rounds; Escort and Strike fly for one. All then refuel/rearm for one round.':'Original game aircraft mechanics remain unchanged; no new CAP/Strike cycles or permanent-loss tracking.'}</div><h3>Continue a previous game</h3><div class="builder-actions">${btn('↑ Import battle backup','open-battle-file','','')}${battle?btn('Share / Save backup','share-battle','','quiet'):''}${battle?btn('Reset from original fleet','reset-battle','','quiet'):''}</div></div></div><div class="panel" style="margin-top:16px"><div class="sectionhead"><h2>Implementation path</h2><span class="badge gray">Prototype v0.4.1 · ${MODE_INFO[MODE].title}</span></div><div class="guide"><div class="card"><span class="num">01 / FLEET</span><strong>Ship losses and guns / AA</strong><p>${IS_EXPERIMENTAL?'Cumulative experimental damage tracks for capital ships; destroyers are targetable.':CUMULATIVE_ARMOUR?'Cumulative confirmed hits against armour; original confirmed/unconfirmed allocation and destroyer screening.':'Original hit allocation and sinking rules; destroyers remain targetable.'}</p></div><div class="card"><span class="num">02 / AVIATION</span><strong>${ENHANCED_AIR?'Carrier readiness and losses':'Published air combat'}</strong><p>${ENHANCED_AIR?'Set aircraft allocations, launch groups, advance rounds and record permanent losses.':'Reference original CAP and Strike strength without new readiness or losses.'}</p></div><div class="card"><span class="num">03 / PROTECT</span><strong>Save / undo</strong><p>Changes auto-save in the browser where allowed; export a JSON battle backup for safety.</p></div></div></div>`;}
 function miniStat(k,v,detail=''){return `<div class="mini-stat metric-${k.toLowerCase().replace(/[^a-z0-9]+/g,'-')}"><div class="k">${k}</div><div class="v">${v}</div>${detail?`<div class="small muted">${detail}</div>`:''}</div>`;}
 function statsStrip(){const st=grandTotals();return `<div class="statgrid"><div class="stat emph"><div class="k">Round</div><div class="v">${battle.round}</div><div class="s">Active battle</div></div>${[['Guns',st.guns,'All task forces'],['AA',st.aa,'All task forces'],['Major ships afloat',st.remaining,`of ${st.ships} tracked`],ENHANCED_AIR?['CAP aloft',st.cap,'On station / low fuel']:['CAP',st.cap,'Original fleet value']].map(([k,v,s])=>`<div class="stat metric-${k.toLowerCase().replace(/[^a-z0-9]+/g,'-')}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('')}</div>`;}
 function damagePips(n,max){return `<div class="track" aria-label="Damage ${n} of ${max}">${Array.from({length:Math.min(20,max)},(_,i)=>`<span class="pip ${i<n?'hit':''}"></span>`).join('')}</div>`;}
 function targetAttrs(ti,kind,idx){return `data-tf="${ti}" data-kind="${kind}" data-idx="${idx}"`;}
 function renderShipRow(s,ti,si){
   const c=cls(s),ko=isKo(s),tf=getTF(ti);const can=!!tf.pending.confirmed||!!tf.pending.unconfirmed;
-  const req=requiredConfirmed(s,tf);
+  const req=requiredConfirmed(s,tf),armourTaken=number(s.armourHits,0,req),hpLeft=Math.max(0,req-armourTaken);
+  const confirmsNeeded=CUMULATIVE_ARMOUR?1:req;
   const allocation=!IS_EXPERIMENTAL&&can&&!ko?`<div class="hit-buttons">
-    ${btn(`6 ×${req} (attacker)`,'assign-original',`data-tf="${ti}" data-idx="${si}" data-kind="ship" data-value="confirmed" ${tf.pending.confirmed<req?'disabled':''}`,'xs hit-confirm')}
+    ${btn(CUMULATIVE_ARMOUR?'6 (attacker) · −1 armour':`6 ×${req} (attacker)`,'assign-original',`data-tf="${ti}" data-idx="${si}" data-kind="ship" data-value="confirmed" ${tf.pending.confirmed<confirmsNeeded?'disabled':''}`,'xs hit-confirm')}
     ${btn('4–5 (defender)','assign-original',`data-tf="${ti}" data-idx="${si}" data-kind="ship" data-value="unconfirmed" ${tf.pending.unconfirmed<1?'disabled':''}`,'xs hit-unconfirm')}
   </div>`:'';
-  return `<tr class="${ko?'ko':s.damage>0?'damaged':''}"><td>
+  const status=IS_EXPERIMENTAL?`${damagePips(s.damage,s.ko)}<span class="progressText">${s.damage} / ${s.ko} ${ko?'— OUT OF ACTION':''}</span>`:
+    CUMULATIVE_ARMOUR?`<span class="${ko?'sunk-mark':armourTaken>0?'armour-damaged':'afloat-mark'}">${ko?'SUNK':armourTaken?'DAMAGED':'Afloat'}</span><div class="progressText">Armour ${ko?0:hpLeft} / ${req} HP${armourTaken>0&&!ko?` · ${armourTaken} confirmed hit${armourTaken===1?'':'s'}`:''}</div>`:
+    `<span class="${ko?'sunk-mark':'afloat-mark'}">${ko?'SUNK':'Afloat'}</span>`;
+  const canCorrect=ko||s.damage>0||(CUMULATIVE_ARMOUR&&armourTaken>0);
+  return `<tr class="${ko?'ko':s.damage>0||(CUMULATIVE_ARMOUR&&armourTaken>0)?'damaged':''}"><td>
     <div class="shipname">${vText(s.name)} <span class="muted small">${c.short}</span></div>
     <div class="shipmeta">${vText(c.name)}</div>${modelLabel(s)}${specialChips(s.classId)}
-  </td><td>${c.guns}</td><td>${c.aa}</td><td style="min-width:125px">${IS_EXPERIMENTAL?`${damagePips(s.damage,s.ko)}<span class="progressText">${s.damage} / ${s.ko} ${ko?'— OUT OF ACTION':''}</span>`:`<span class="${ko?'sunk-mark':'afloat-mark'}">${ko?'SUNK':'Afloat'}</span>`}</td>
+  </td><td>${c.guns}</td><td>${c.aa}</td><td style="min-width:125px">${status}</td>
   <td><div class="damagecontrols">${IS_EXPERIMENTAL?btn('Target / hits','attack-modal',targetAttrs(ti,'ship',si)+(ko?' disabled':''),'xs action-attack'):allocation}
-    ${btn(IS_EXPERIMENTAL?'−1 damage':'Undo sinking','repair',`data-tf="${ti}" data-idx="${si}" ${(!ko&&s.damage===0)?'disabled':''}`,'xs quiet')}
+    ${btn(IS_EXPERIMENTAL?'−1 damage':CUMULATIVE_ARMOUR?'Undo armour hit':'Undo sinking','repair',`data-tf="${ti}" data-idx="${si}" ${!canCorrect?'disabled':''}`,'xs quiet')}
     ${btn('Match model','match-model',`data-tf="${ti}" data-idx="${si}"`,'xs')}
     ${btn('Rename','rename',`data-tf="${ti}" data-idx="${si}"`,'xs quiet')}</div></td></tr>`;
 }
@@ -496,10 +514,10 @@ function fleetPage(){
   return `${statsStrip()}${modBlock}${battle.tfs.map((tf,ti)=>{
     const t=tfTotals(tf),pending=tf.pending.confirmed+tf.pending.unconfirmed;
     return `<section class="panel tf tf-${ti%3}"><div class="tf-head"><div><div class="eyebrow">${vText(tf.id)}</div><h2>${vText(tf.name)} ${btn('Rename','rename-tf',`data-tf="${ti}"`,'xs quiet')}</h2>${tf.commander?`<div class="note">${vText(tf.commander)}</div>`:''}</div><div class="tf-stats">${miniStat('Guns',t.guns)}${miniStat('AA',t.aa)}${ENHANCED_AIR?miniStat('CAP aloft',t.cap):miniStat('CAP',t.cap)}${ENHANCED_AIR?miniStat('Strike airborne',t.strike):miniStat('Strike',t.strike)}</div></div>
-    ${!IS_EXPERIMENTAL?`<div class="hit-pool-panel"><div><b>Published ship hit allocation</b><div class="note">6 = confirmed, allocated by attacker. 4–5 = unconfirmed, allocated by defender. One unconfirmed hit sinks any ship, including armoured ships; an Armoured ship needs its required confirmed hits together.</div></div>${btn('Record attack hits','open-hit-pool',`data-tf="${ti}" ${pending?'disabled':''}`,'sm primary')}</div>`:''}
+    ${!IS_EXPERIMENTAL?`<div class="hit-pool-panel"><div><b>${CUMULATIVE_ARMOUR?'Cumulative armour · house rule':'Published ship hit allocation'}</b><div class="note">6 = confirmed, allocated by attacker. 4–5 = unconfirmed, allocated by defender. One unconfirmed hit sinks any ship, including armoured ships. ${CUMULATIVE_ARMOUR?'Each confirmed hit removes one point of armour and persists across attacks.':'An Armoured ship needs its full confirmed-hit threshold within one attack.'}</div></div>${btn('Record attack hits','open-hit-pool',`data-tf="${ti}" ${pending?'disabled':''}`,'sm primary')}</div>`:''}
     ${pending?`<div class="callout warning"><b>${pending} unallocated hits:</b> ${tf.pending.confirmed} confirmed (attacker) + ${tf.pending.unconfirmed} unconfirmed (defender). ${IS_EXPERIMENTAL?'Assign to another declared target with Target / hits.':'Assign each hit below using the corresponding button. Destroyers are eligible for unconfirmed hits.'} ${btn('Discard unallocated hits','clear-pending',`data-tf="${ti}"`,'xs')}</div>`:''}
-    <table class="fleettable"><thead><tr><th>Ship / miniature</th><th>Guns</th><th>AA</th><th>${IS_EXPERIMENTAL?'Damage / survivors':'Status / survivors'}</th><th>Record action</th></tr></thead><tbody>${tf.ships.map((s,si)=>renderShipRow(s,ti,si)).join('')}${tf.screens.map((sc,si)=>renderScreenRow(sc,ti,si)).join('')}</tbody></table></section>`;
-  }).join('')}<div class="callout">${IS_EXPERIMENTAL?'<b>Experimental:</b> confirmed (6) = 2 damage; unconfirmed (4–5) = 1; cumulative ship hull points and hangar fire +2 on the first confirmed hit while Strike is Refuel/Rearm.':'<b>Original ship combat:</b> keep the published sinking and Armoured rules. Confirmed hits go to the attacker for allocation; unconfirmed hits go to the defender and may be assigned to destroyers. Ship Guns and AA totals automatically update when ships are sunk.'} Historical class and model labels are for matching physical miniatures; they do not alter combat statistics.</div>`;
+    <table class="fleettable"><thead><tr><th>Ship / miniature</th><th>Guns</th><th>AA</th><th>${IS_EXPERIMENTAL?'Damage / survivors':CUMULATIVE_ARMOUR?'Armour / survivors':'Status / survivors'}</th><th>Record action</th></tr></thead><tbody>${tf.ships.map((s,si)=>renderShipRow(s,ti,si)).join('')}${tf.screens.map((sc,si)=>renderScreenRow(sc,ti,si)).join('')}</tbody></table></section>`;
+  }).join('')}<div class="callout">${IS_EXPERIMENTAL?'<b>Experimental:</b> confirmed (6) = 2 damage; unconfirmed (4–5) = 1; cumulative ship hull points and hangar fire +2 on the first confirmed hit while Strike is Refuel/Rearm.':CUMULATIVE_ARMOUR?'<b>Enhanced armour house rule:</b> Each confirmed hit (6) removes 1 armour point, accumulating across attacks. Confirmed hits go to the attacker for allocation; unconfirmed hits (4–5) go to the defender and may sink any vessel, including destroyers. Guns and AA update only when a ship sinks.':'<b>Original ship combat:</b> Keep published sinking and Armoured thresholds within each attack. Confirmed hits go to the attacker; unconfirmed hits go to the defender, including destroyers. Guns and AA update when sunk.'} Historical class and model labels are for matching physical miniatures; they do not alter combat statistics.</div>`;
 }
 function availableAircraft(a,group){const g=a.groups;return group==='strike'?a.bombers-g.strike.count:a.fighters-g.cap.count-g.escort.count;}
 function renderGroupRow(s,ti,si,group){const g=s.air.groups[group],cap=group==='cap';const states=cap?['ready','air1','air2','rearm']:['ready','air1','rearm'];return `<div class="squadronrow group-${group}"><div><div class="group-type">${LABELS[group]}</div><small>${group==='cap'?'Defensive fighters · 2 rounds':group==='escort'?'Fighter escort · 1 round':'Bombers · 1 round'}</small></div><div class="count">${btn('−','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="-1" ${g.count===0||g.status!=='ready'?'disabled':''}`,'sm') }<b>${g.count}</b>${btn('+','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="1" ${availableAircraft(s.air,group)<=0||g.status!=='ready'?'disabled':''}`,'sm')}</div><div class="states">${states.map(st=>`<button class="state status-${st} group-${group} ${g.status===st?'active':''}" data-action="status" data-tf="${ti}" data-idx="${si}" data-group="${group}" data-value="${st}">${statusLabel(st,group)}</button>`).join('')}</div><div class="lossbox">${btn('−1 lost','lose-squadron',`data-tf="${ti}" data-idx="${si}" data-group="${group}" ${g.count<=0?'disabled':''}`,'xs danger')}</div></div>`;}
