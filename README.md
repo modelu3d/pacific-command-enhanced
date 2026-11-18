@@ -1,4 +1,4 @@
-# Pacific Command Enhanced — Game Modes v0.5
+# Pacific Command Enhanced — Game Modes v0.5.1
 
 An **unofficial, independent playtest companion** for *Pacific Command*. The app imports JSON exported by the [original Type37/WarLore Fleet Builder](https://type37.github.io/pacific-command-builder/); no original builder code is embedded.
 
@@ -12,6 +12,12 @@ An **unofficial, independent playtest companion** for *Pacific Command*. The app
 
 At the root URL, choose a mode. Each stores its own browser save under a distinct key and exports backups tagged with its mode. Cross-mode battle-backup imports are blocked to avoid applying the wrong rules. **Import the same original Fleet Builder JSON independently into each mode** to compare game types.
 
+
+### v0.5.1 — Inline carrier expand/collapse
+
+The Carrier Operations overview now acts as an accordion: **tap any carrier's summary row to expand its full controls directly underneath**; tap again or use the inline Collapse button to close it. Only one carrier is expanded at a time to keep the overview short. There is no longer any need to switch between Overview and Details at the top of the page. The task-force totals and compact carrier rows remain visible. In iPad focus mode, the expanded controls have their own scroll area.
+
+This is a presentation-only update. No aircraft mechanics, battle JSON schemas, storage keys, or aircraft totals are changed.
 
 ### v0.5 — iPad carrier command and bomber formations
 
