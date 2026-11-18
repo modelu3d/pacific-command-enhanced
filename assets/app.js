@@ -613,6 +613,49 @@ function airSummary(tf){
    ${miniStat('CAP aloft',t.cap,`${t.capStation} on station · ${t.capLow} low fuel`)}
   </div>`;
 }
+function carrierToolbar(){
+ return `<div class="carrier-console-bar">
+   <div class="carrier-console-title"><span class="eyebrow">PRIVATE CARRIER OPERATIONS · ROUND ${battle.round}</span><h2>Carrier Command <span class="focus-mode-badge">${carrierView==='overview'?'Overview':'Details'}</span></h2></div>
+   <div class="carrier-console-actions">
+     ${btn('Overview','carrier-overview','',`sm ${carrierView==='overview'?'active':''}`)}
+     ${btn('Details','carrier-details','',`sm ${carrierView==='detail'?'active':''}`)}
+     ${btn(carrierFocus?'Exit focus':'Fit iPad','carrier-focus','',`sm ${carrierFocus?'active':''}`)}
+     ${btn('↶ Undo','undo',undoStack.length?'':'disabled','sm quiet')}
+     ${btn('⇧ Next round','advance-round','','sm primary')}
+     ${btn('↓ Backup','export-battle','','sm quiet')}
+   </div>
+ </div>`;
+}
+function compactAirCell(group,count,status,extra=''){
+ return `<span class="overview-ops-cell overview-cell-${group}"><strong>${count} <small>${group==='cap'?'CAP':group==='escort'?'Escort':'Strike'}</small></strong><span class="overview-status overview-status-${status}">${statusLabel(status,group)}</span>${extra?`<em>${extra}</em>`:''}</span>`;
+}
+function carrierOverviewPage(){
+ const tfs=battle.tfs.map((tf,ti)=>({tf,ti})).filter(({tf})=>carriers(tf).length>0);
+ return `${carrierToolbar()}<div class="overview-help">Tap a carrier to edit its aircraft or operations. One Formation equals one combat die.</div>
+ <div class="overview-tf-filters">${btn('All TFs','overview-tf',`data-value="all"`,`xs ${overviewTF==='all'?'active':''}`)}${tfs.map(({tf,ti})=>btn(tf.id,'overview-tf',`data-value="${ti}"`,`xs ${overviewTF===String(ti)?'active':''}`)).join('')}</div>
+ ${tfs.filter(({ti})=>overviewTF==='all'||overviewTF===String(ti)).map(({tf,ti})=>{
+   const t=tfTotals(tf);
+   return `<section class="carrier-overview-tf">
+     <div class="overview-tf-bar"><div><b class="overview-tf-id">${vText(tf.id)}</b><strong class="overview-tf-name">${vText(tf.name)}</strong></div><span>${currentCarriers(tf).length}/${carriers(tf).length} carriers</span></div>
+     <div class="overview-tf-strength">
+       <span><b>${t.cap}</b> CAP aloft</span><span><b>${t.readyStrike}</b> Strike ready <small>(${t.readyDive} Dive / ${t.readyTorpedo} Torp)</small></span>
+       <span><b>${t.readyEscort}</b> Escort ready</span><span><b>${t.airStrike}</b> Strike airborne <small>(${t.airDive} Dive / ${t.airTorpedo} Torp)</small></span>
+       <span><b>${t.airEscort}</b> Escort airborne</span>
+     </div>
+     <div class="overview-columns" aria-hidden="true"><span>Carrier / Aircraft</span><span>CAP</span><span>Escort</span><span>Strike</span></div>
+     ${tf.ships.map((s,si)=>{
+       if(!s.air)return '';
+       const a=s.air,mix=strikeMix(a),g=a.groups,ko=isKo(s);
+       return `<button type="button" class="carrier-overview-row ${ko?'overview-ko':''}" data-action="open-carrier" data-tf="${ti}" data-idx="${si}" aria-label="Open carrier ${vText(s.name)} in ${vText(tf.id)}">
+         <span class="overview-ship"><b>${vText(s.name)}</b><small>${vText(CLASSES[s.classId].short)} · ${a.fighters} Fighters + ${a.bombers} Bombers / ${s.capacity}</small>${ko?'<em>OUT OF ACTION</em>':''}</span>
+         ${compactAirCell('cap',g.cap.count,g.cap.status)}
+         ${compactAirCell('escort',g.escort.count,g.escort.status)}
+         ${compactAirCell('strike',g.strike.count,g.strike.status,`${mix.dive} Dive / ${mix.torpedo} Torp`)}
+       </button>`;
+     }).join('')}
+   </section>`;
+ }).join('')}`;
+}
 function carrierPage(){
   if(!battle)return emptyPage();
   if(!ENHANCED_AIR){
