@@ -571,7 +571,29 @@ function fleetPage(){
   }).join('')}<div class="callout">${IS_EXPERIMENTAL?'<b>Experimental:</b> confirmed (6) = 2 damage; unconfirmed (4–5) = 1; cumulative ship hull points and hangar fire +2 on the first confirmed hit while Strike is Refuel/Rearm.':CUMULATIVE_ARMOUR?'<b>Enhanced armour house rule:</b> Each confirmed hit (6) removes 1 armour point, accumulating across attacks. Confirmed hits go to the attacker for allocation; unconfirmed hits (4–5) go to the defender and may sink any vessel, including destroyers. Guns and AA update only when a ship sinks.':'<b>Original ship combat:</b> Keep published sinking and Armoured thresholds within each attack. Confirmed hits go to the attacker; unconfirmed hits go to the defender, including destroyers. Guns and AA update when sunk.'} Historical class and model labels are for matching physical miniatures; they do not alter combat statistics.</div>`;
 }
 function availableAircraft(a,group){const g=a.groups;return group==='strike'?a.bombers-g.strike.count:a.fighters-g.cap.count-g.escort.count;}
-function renderGroupRow(s,ti,si,group){const g=s.air.groups[group],cap=group==='cap';const states=cap?['ready','air1','air2','rearm']:['ready','air1','rearm'];return `<div class="squadronrow group-${group}"><div><div class="group-type">${LABELS[group]}</div><small>${group==='cap'?'Defensive fighters · 2 rounds':group==='escort'?'Fighter escort · 1 round':'Bombers · 1 round'}</small></div><div class="count">${btn('−','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="-1" ${g.count===0||g.status!=='ready'?'disabled':''}`,'sm') }<b>${g.count}</b>${btn('+','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="1" ${availableAircraft(s.air,group)<=0||g.status!=='ready'?'disabled':''}`,'sm')}</div><div class="states">${states.map(st=>`<button class="state status-${st} group-${group} ${g.status===st?'active':''}" data-action="status" data-tf="${ti}" data-idx="${si}" data-group="${group}" data-value="${st}">${statusLabel(st,group)}</button>`).join('')}</div><div class="lossbox">${btn('−1 lost','lose-Formation',`data-tf="${ti}" data-idx="${si}" data-group="${group}" ${g.count<=0?'disabled':''}`,'xs danger')}</div></div>`;}
+function renderGroupRow(s,ti,si,group){
+ const g=s.air.groups[group],cap=group==='cap',mix=group==='strike'?strikeMix(s.air):null;
+ const states=cap?['ready','air1','air2','rearm']:['ready','air1','rearm'];
+ const loss=group==='strike'?
+   `<div class="lossbox bomber-loss">${btn('−1 Dive','lose-bomber',`data-tf="${ti}" data-idx="${si}" data-value="dive" ${mix.dive<1?'disabled':''}`,'xs danger')}${btn('−1 Torpedo','lose-bomber',`data-tf="${ti}" data-idx="${si}" data-value="torpedo" ${mix.torpedo<1?'disabled':''}`,'xs danger')}</div>`:
+   `<div class="lossbox">${btn('−1 lost','lose-squadron',`data-tf="${ti}" data-idx="${si}" data-group="${group}" ${g.count<1?'disabled':''}`,'xs danger')}</div>`;
+ return `<div class="squadronrow group-${group}">
+   <div><div class="group-type">${LABELS[group]}</div><small>${group==='cap'?'Defensive fighters · 2 rounds':group==='escort'?'Fighter escort · 1 round':'Dive + Torpedo · 1 round'}</small></div>
+   <div class="count">${btn('−','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="-1" ${g.count===0||g.status!=='ready'?'disabled':''}`,'sm')}<b>${g.count}</b>${btn('+','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="1" ${availableAircraft(s.air,group)<=0||g.status!=='ready'?'disabled':''}`,'sm')}</div>
+   <div class="states">${states.map(st=>`<button class="state status-${st} group-${group} ${g.status===st?'active':''}" data-action="status" data-tf="${ti}" data-idx="${si}" data-group="${group}" data-value="${st}">${statusLabel(st,group)}</button>`).join('')}</div>${loss}
+ </div>`;
+}
+function renderBomberSplit(s,ti,si){
+ const a=s.air;ensureBomberTypes(a);const mix=strikeMix(a),locked=battle.started||a.groups.strike.status!=='ready';
+ const note=battle.mods.includes('unreliable-torpedoes')?
+   `<div class="torpedo-rule"><strong>Unreliable Torpedoes:</strong> reroll confirmed (6) Torpedo Bomber hits once; Dive Bomber dice are unaffected in this enhanced mode.</div>`:'';
+ return `<div class="bomber-split">
+   <div class="split-title"><strong>Bomber Formations · Strike composition</strong><span class="small muted">${a.bombers} surviving</span></div>
+   <div class="split-labels"><span>Dive Bombers <b>${a.bomberTypes.dive}</b></span><span>Torpedo Bombers <b>${a.bomberTypes.torpedo}</b></span></div>
+   <input class="dive-slider" type="range" min="0" max="${a.bombers}" step="1" value="${a.bomberTypes.dive}" data-action="dive-slider" data-tf="${ti}" data-idx="${si}" aria-label="Dive bomber formations aboard ${vText(s.name)}" ${locked?'disabled':''}>
+   <div class="split-deployed">Allocated to Strike: <b>${mix.dive} Dive</b> + <b>${mix.torpedo} Torpedo</b>${locked?' · Mix locked during battle':''}</div>${note}
+ </div>`;
+}
 function carrierTaskForceBanner(tf){
   const total=carriers(tf).length, active=currentCarriers(tf).length;
   return `<div class="carrier-tf-banner">
