@@ -88,3 +88,41 @@
 
 /* v0.4.1 — persistent armour-hit indicator in Enhanced Aircraft */
 .armour-damaged{display:inline-block;color:#f1cb83;background:#3a3326;border:1px solid #9b7d43;border-radius:6px;padding:4px 9px;font-size:12px;font-weight:800;letter-spacing:.05em}
+
+
+/* v0.4.2 — prominent, accessible task-force separators in Carrier Operations */
+.carrier-tf-banner{
+ display:flex;align-items:center;justify-content:space-between;gap:18px;
+ margin:30px 0 12px;padding:18px 22px;
+ border:1px solid #688296;border-left:5px solid #dcc28b;
+ border-radius:13px;
+ background:linear-gradient(112deg,#294458 0%,#1b3345 54%,#122332 100%);
+ box-shadow:0 13px 28px rgba(0,0,0,.22);
+}
+.carrier-tf-title{display:flex;align-items:center;gap:17px;flex-wrap:wrap;min-width:0}
+.carrier-tf-id{
+ display:inline-flex;align-items:center;justify-content:center;
+ padding:11px 16px;min-width:76px;border-radius:9px;
+ background:#e2c991;color:#182633;font-size:21px;font-weight:900;
+ letter-spacing:.08em;font-variant-numeric:tabular-nums;
+}
+.carrier-tf-heading{min-width:0}
+.carrier-tf-heading .eyebrow{color:#bbd1dc;font-size:10px;letter-spacing:.18em}
+.carrier-tf-heading h2{
+ color:#f4f7f8;font-size:clamp(22px,2.4vw,29px);
+ line-height:1.2;letter-spacing:-.02em;margin:3px 0 0;
+ overflow-wrap:anywhere;
+}
+.carrier-tf-meta{
+ padding:7px 12px;border:1px solid #648293;border-radius:30px;
+ color:#d4e1e9;font-size:12px;font-weight:700;
+ background:rgba(10,22,34,.32);white-space:nowrap;
+}
+.carrier-tf-banner+.airsummary{margin-top:0}
+@media(max-width:720px){
+ .carrier-tf-banner{flex-direction:column;align-items:stretch;gap:11px;margin-top:22px;padding:14px 15px}
+ .carrier-tf-title{flex-wrap:nowrap;gap:12px}
+ .carrier-tf-id{font-size:17px;min-width:61px;padding:10px 11px}
+ .carrier-tf-heading h2{font-size:21px}
+ .carrier-tf-meta{align-self:flex-start;white-space:normal}
+}
