@@ -14,8 +14,8 @@ const CLASSES = {
   'destroyer':      {short:'DD', name:'Destroyers',     guns:1,aa:1,capacity:0, ko:2,screen:true},
   'submarine':      {short:'SS', name:'Submarines',     guns:1,aa:0,capacity:0, ko:2,screen:true},
   'auxiliary':      {short:'AUX',name:'Auxiliaries',   guns:0,aa:0,capacity:0, ko:2,screen:true},
-  'fighter-sqn':    {short:'F',  name:'Fighter squadron', aircraft:true},
-  'bomber-sqn':     {short:'B',  name:'Bomber squadron', aircraft:true}
+  'fighter-sqn':    {short:'F',  name:'Fighter Formation', aircraft:true},
+  'bomber-sqn':     {short:'B',  name:'Bomber Formation', aircraft:true}
 };
 const GROUPS = ['cap','escort','strike'];
 const LABELS = {cap:'CAP',escort:'Escort',strike:'Strike'};
@@ -53,6 +53,7 @@ const MOD_NAMES={
  'overcomplicated-plans':'Overcomplicated Plans', 'wily-commander':'Wily Commander'
 };
 let battle=null, undoStack=[], tab='builder', modal=null, notice='', storageOk=true;
+let carrierView='overview', carrierFocus=false, selectedCarrier=null, overviewTF='all';
 const clone=(v)=>JSON.parse(JSON.stringify(v));
 const escapeHtml=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeId=(s)=>String(s).replace(/[^a-zA-Z0-9_-]/g,'');
@@ -68,6 +69,52 @@ function effectiveCapacity(classId,mods){
   if(n && CLASSES[classId].carrier && mods.includes('increased-aircraft')) n+=3;
   if(n && mods.includes('aircraft-shortage')) n=Math.ceil(n/2);
   return n;
+}
+function defaultDive(n){return Math.round(number(n)*.75);}
+function ensureBomberTypes(air){
+  const total=number(air.bombers);
+  if(!air.bomberTypes || !Number.isFinite(air.bomberTypes.dive)){
+    const dive=defaultDive(total);air.bomberTypes={dive,torpedo:total-dive};
+  } else {
+    air.bomberTypes.dive=number(air.bomberTypes.dive,0,total);
+    air.bomberTypes.torpedo=total-air.bomberTypes.dive;
+  }
+  const g=air.groups?.strike;if(!g)return;
+  g.count=number(g.count,0,total);
+  const low=Math.max(0,g.count-air.bomberTypes.torpedo),high=Math.min(g.count,air.bomberTypes.dive);
+  g.dive=Number.isFinite(g.dive)?number(g.dive,low,high):number(Math.round(g.count*.75),low,high);
+}
+function strikeMix(air){
+  ensureBomberTypes(air);
+  const g=air.groups.strike;return {dive:g.dive,torpedo:g.count-g.dive};
+}
+function setDiveMix(ti,si,value){
+  const ship=findCarrier(ti,si);if(!ship||isKo(ship))return;
+  const a=ship.air;ensureBomberTypes(a);
+  if(battle.started||a.groups.strike.status!=='ready'){
+    notice='Dive/Torpedo composition is set before battle. Losses then reduce each type separately.';render();return;
+  }
+  const d=number(value,0,a.bombers);
+  if(d===a.bomberTypes.dive)return;
+  commit('aircraft-mix',()=>{
+    a.bomberTypes={dive:d,torpedo:a.bombers-d};
+    const g=a.groups.strike,lo=Math.max(0,g.count-a.bomberTypes.torpedo),hi=Math.min(g.count,d);
+    g.dive=number(Math.round(g.count*d/Math.max(1,a.bombers)),lo,hi);
+    return `${ship.name}: Strike complement set to ${d} Dive / ${a.bombers-d} Torpedo Formations.`;
+  });
+}
+function loseBomberFormation(ti,si,type,reserve=false){
+  if(!['dive','torpedo'].includes(type))return;
+  const ship=findCarrier(ti,si);if(!ship||isKo(ship))return;
+  const a=ship.air;ensureBomberTypes(a);const g=a.groups.strike,mix=strikeMix(a);
+  const available=reserve?a.bomberTypes[type]-mix[type]:mix[type];
+  if(available<1)return;
+  commit('loss',()=>{
+    a.bomberTypes[type]--;a.bombers--;
+    if(!reserve){g.count--;if(type==='dive')g.dive--;}
+    battle.started=true;
+    return `${ship.name}: 1 ${type==='dive'?'Dive':'Torpedo'} Bomber Formation permanently lost${reserve?' (reserve)':''}.`;
+  });
 }
 function makeBattle(fleet){
   if(!fleet || !Array.isArray(fleet.taskForces) || fleet.taskForces.length<1 || fleet.taskForces.length>30) throw Error('Not a valid Pacific Command builder export (taskForces not found).');
@@ -108,10 +155,10 @@ function makeBattle(fleet){
       }
       tf.pool[key]=remaining;
     }
-    for(const s of cs){s.air.groups.cap.count=s.air.fighters;s.air.groups.strike.count=s.air.bombers;}
+    for(const s of cs){s.air.groups.cap.count=s.air.fighters;s.air.groups.strike.count=s.air.bombers;ensureBomberTypes(s.air);}
     b.tfs.push(tf);
   });
-  b.log.push({round:1,text:`Battle created from ${b.name}. Check squadron distribution before launching.`});
+  b.log.push({round:1,text:`Battle created from ${b.name}. Check Formation distribution before launching.`});
   return b;
 }
 function demoFleet(){
@@ -126,7 +173,7 @@ function demoFleet(){
   ]};
 }
 function tfTotals(tf){
-  let guns=0,aa=0,cap=0,capStation=0,capLow=0,readyStrike=0,readyEscort=0,airStrike=0,airEscort=0,active=0;
+  let guns=0,aa=0,cap=0,capStation=0,capLow=0,readyStrike=0,readyEscort=0,airStrike=0,airEscort=0,readyDive=0,readyTorpedo=0,airDive=0,airTorpedo=0,active=0;
   for(const s of tf.ships){
     if(isKo(s))continue;
     active++;
@@ -135,19 +182,20 @@ function tfTotals(tf){
       const g=s.air.groups;
       if(g.cap.status==='air1'){cap+=g.cap.count;capStation+=g.cap.count;}
       if(g.cap.status==='air2'){cap+=g.cap.count;capLow+=g.cap.count;}
-      if(g.strike.status==='ready')readyStrike+=g.strike.count;
+      const mix=strikeMix(s.air);
+      if(g.strike.status==='ready'){readyStrike+=g.strike.count;readyDive+=mix.dive;readyTorpedo+=mix.torpedo;}
       if(g.escort.status==='ready')readyEscort+=g.escort.count;
-      if(g.strike.status==='air1')airStrike+=g.strike.count;
+      if(g.strike.status==='air1'){airStrike+=g.strike.count;airDive+=mix.dive;airTorpedo+=mix.torpedo;}
       if(g.escort.status==='air1')airEscort+=g.escort.count;
     }
   }
   for(const sc of tf.screens){guns+=CLASSES[sc.classId].guns*sc.remaining;aa+=CLASSES[sc.classId].aa*sc.remaining;}
   if(!ENHANCED_AIR){
-    // Published-game view: squadrons are not subject to new readiness/attrition mechanics.
+    // Published-game view: Formations are not subject to new readiness/attrition mechanics.
     cap=0;airStrike=0;
     for(const s of currentCarriers(tf)){cap+=s.air.fighters;airStrike+=s.air.bombers;}
   }
-  return {guns,aa,cap,capStation,capLow,readyStrike,readyEscort,airStrike,airEscort,strike:airStrike,escort:airEscort,active};
+  return {guns,aa,cap,capStation,capLow,readyStrike,readyEscort,airStrike,airEscort,readyDive,readyTorpedo,airDive,airTorpedo,strike:airStrike,escort:airEscort,active};
 }
 function grandTotals(){
   let guns=0,aa=0,cap=0,strike=0,ships=0,remaining=0;
@@ -177,6 +225,7 @@ function normalizeBattle(data){
       if(typeof ship.sunk!=='boolean')ship.sunk=false;
       if(CUMULATIVE_ARMOUR)ship.armourHits=number(ship.armourHits,0,baseArmour(ship.classId));
       if(!ship.air)continue;
+      ensureBomberTypes(ship.air);
       for(const key of GROUPS){
         const g=ship.air.groups?.[key];if(!g)continue;
         if(g.status==='rearm'&&!Number.isFinite(g.readyAtRound))g.readyAtRound=Number(data.round)+1;
@@ -210,7 +259,7 @@ function importFleet(fleet){
   try{
     const next=makeBattle(fleet);
     if(battle && !confirm('Start a new battle? Your current battle will be replaced. Export it first if you want to keep a backup.'))return;
-    battle=next;undoStack=[];tab='fleet';notice='Fleet imported. Check carrier squadron assignments before beginning.';persist();render();
+    battle=next;undoStack=[];tab='fleet';notice='Fleet imported. Check carrier Formation assignments before beginning.';persist();render();
   }catch(e){alert('Import failed: '+e.message);}
 }
 function importBattle(data){
@@ -249,7 +298,7 @@ function modifyPool(ti,si,key,diff){
       else if(air.groups.cap.count>0)air.groups.cap.count--;
       else if(air.groups.escort.count>0)air.groups.escort.count--;
     }
-    else air.groups.strike.count=Math.max(0,Math.min(air.groups.strike.count+diff,air.bombers));
+    else {air.groups.strike.count=Math.max(0,Math.min(air.groups.strike.count+diff,air.bombers));air.bomberTypes=null;ensureBomberTypes(air);}
     return `${s.name}: ${key} assigned ${diff>0?'+1':'−1'} (${air[key]}).`;
   });
 }
@@ -258,7 +307,7 @@ function adjustGroup(ti,si,group,diff){
   const g=s.air.groups[group];if(g.status!=='ready'){notice='Group allocations can be changed only while Ready.';render();return;}
   const max=group==='strike'?s.air.bombers:s.air.fighters-s.air.groups[group==='cap'?'escort':'cap'].count;
   if(g.count+diff<0||g.count+diff>max)return;
-  commit('allocation',()=>{g.count+=diff;return `${s.name} ${LABELS[group]} allocation ${g.count}.`;});
+  commit('allocation',()=>{g.count+=diff;if(group==='strike')ensureBomberTypes(s.air);return `${s.name} ${LABELS[group]} allocation ${g.count}.`;});
 }
 function statusLabel(status,group=''){
   if(status==='ready')return 'Ready';
@@ -331,14 +380,16 @@ function advanceRound(){
 function loseSquadron(ti,si,group){
   const s=findCarrier(ti,si);if(!s||isKo(s))return;
   const g=s.air.groups[group];if(g.count<=0)return;
-  commit('loss',()=>{g.count--;if(group==='strike')s.air.bombers--;else s.air.fighters--;battle.started=true;return `${s.name}: 1 ${group==='strike'?'bomber':'fighter'} squadron permanently lost from ${LABELS[group]}.`;});
+  if(group==='strike'){const mix=strikeMix(s.air);loseBomberFormation(ti,si,mix.dive>=mix.torpedo?'dive':'torpedo');return;}
+  commit('loss',()=>{g.count--;s.air.fighters--;battle.started=true;return `${s.name}: 1 fighter Formation permanently lost from ${LABELS[group]}.`;});
 }
 function loseReserve(ti,si,kind){
   const s=findCarrier(ti,si);if(!s||isKo(s))return;
   const a=s.air;
   const unused=kind==='fighters'?a.fighters-a.groups.cap.count-a.groups.escort.count:a.bombers-a.groups.strike.count;
   if(unused<1)return;
-  commit('loss',()=>{a[kind]--;battle.started=true;return `${s.name}: 1 unassigned ${kind==='fighters'?'fighter':'bomber'} squadron permanently lost.`;});
+  if(kind==='bombers'){ensureBomberTypes(a);const mix=strikeMix(a);const type=a.bomberTypes.dive>mix.dive?'dive':'torpedo';loseBomberFormation(ti,si,type,true);return;}
+  commit('loss',()=>{a[kind]--;battle.started=true;return `${s.name}: 1 unassigned fighter Formation permanently lost.`;});
 }
 function openHitPool(ti){
   const tf=getTF(ti);if(!tf)return;
@@ -478,7 +529,7 @@ function vText(v){return escapeHtml(v);}
 function btn(label,action,attr='',type=''){return `<button class="btn ${type}" data-action="${action}" ${attr}>${label}</button>`;}
 function renderHeader(){return `<div class="topbar"><div class="topinner"><div class="brand"><div class="roundel">✦</div><div><div class="brandline">PACIFIC <span>COMMAND</span></div><div class="brand-sub">${escapeHtml(MODE_INFO[MODE].title)} · Battle Companion v0.4.2</div></div></div><div class="header-side"><span class="round">ROUND <b id="round-badge">${battle?.round||'—'}</b></span>${battle?btn('↶ Undo','undo',undoStack.length?'':'disabled','sm quiet'):''}</div></div></div>`;}
 function renderControls(){return `<div class="top-content"><div><div class="eyebrow">${battle?`${vText(battle.faction||'Fleet')} / ${vText(battle.era||'Battle')}`:'Build · Command · Record'}</div><h1>${battle?vText(battle.name):'Your fleet. One battle dashboard.'}</h1><p>${battle?`${battle.tfs.length} task forces · aircraft and ship losses tracked in one place`:'Import an existing fleet, then manage ships, aircraft and carrier states.'}</p></div><div class="tools">${battle?`${btn('↶ Undo','undo',undoStack.length?'':'disabled','sm')}${btn('⇧ Advance round','advance-round','','primary')}${btn('↓ Battle backup','export-battle','','sm')}${btn('Share / Save backup','share-battle','','sm')}`:''}</div></div><div class="modes-switch"><a href="../" class="btn sm quiet">← Game modes</a><span class="muted small">${escapeHtml(MODE_INFO[MODE].tag)}</span></div><div class="tabs">${[['builder','01  Fleet Builder'],['fleet','02  Fleet Overview'],['carriers',ENHANCED_AIR?'03  Carrier Operations':'03  Fleet Aviation'],['log','Battle Log']].map(([key,label])=>`<button class="tab ${tab===key?'active':''}" data-action="tab" data-value="${key}">${label}</button>`).join('')}</div>${notice?`<div class="callout warning" role="status">${vText(notice)} ${btn('Dismiss','dismiss-notice','','xs quiet')}</div>`:''}${!storageOk?'<div class="callout warning">Your browser is blocking local saving. Export a battle backup to preserve your changes.</div>':''}`;}
-function builderPage(){return `<div class="hero"><div class="panel"><div class="eyebrow">Step 1 / Build</div><h2>Use the existing Fleet Builder</h2><p class="muted">Keep building and validating fleets in WarLore/Type37's existing tool. Download its JSON export, then load it here as a new battle.</p><div class="flowline"><div class="stage"><b>Build</b><span>Original builder</span></div><span class="arrow">→</span><div class="stage"><b>Export JSON</b><span>Fleets menu</span></div><span class="arrow">→</span><div class="stage"><b>Import here</b><span>Start battle</span></div></div><div class="builder-actions"><a class="btn primary" target="_blank" rel="noopener noreferrer" href="https://type37.github.io/pacific-command-builder/">Open Fleet Builder ↗</a>${btn('↑ Import fleet JSON','open-fleet-file','','')}${btn('Try sample fleet','demo','','quiet')}</div><p class="note">Builder instructions: open <b>Fleet</b> → <b>Export file</b>, then choose that .json file here. This does not change the original builder.</p></div><div class="panel"><div class="eyebrow">Step 2 / Configure</div><h2>Assign aircraft to carriers</h2><p class="muted">The builder pools fighter and bomber squadrons by task force. This companion spreads them across individual carriers automatically. In enhanced modes, you can adjust those allocations before combat.</p><div class="callout">${ENHANCED_AIR?'Each carrier has fixed <b>CAP</b>, <b>Escort</b> and <b>Strike</b> groups. CAP flies for two rounds; Escort and Strike fly for one. All then refuel/rearm for one round.':'Original game aircraft mechanics remain unchanged; no new CAP/Strike cycles or permanent-loss tracking.'}</div><h3>Continue a previous game</h3><div class="builder-actions">${btn('↑ Import battle backup','open-battle-file','','')}${battle?btn('Share / Save backup','share-battle','','quiet'):''}${battle?btn('Reset from original fleet','reset-battle','','quiet'):''}</div></div></div><div class="panel" style="margin-top:16px"><div class="sectionhead"><h2>Implementation path</h2><span class="badge gray">Prototype v0.4.2 · ${MODE_INFO[MODE].title}</span></div><div class="guide"><div class="card"><span class="num">01 / FLEET</span><strong>Ship losses and guns / AA</strong><p>${IS_EXPERIMENTAL?'Cumulative experimental damage tracks for capital ships; destroyers are targetable.':CUMULATIVE_ARMOUR?'Cumulative confirmed hits against armour; original confirmed/unconfirmed allocation and destroyer screening.':'Original hit allocation and sinking rules; destroyers remain targetable.'}</p></div><div class="card"><span class="num">02 / AVIATION</span><strong>${ENHANCED_AIR?'Carrier readiness and losses':'Published air combat'}</strong><p>${ENHANCED_AIR?'Set aircraft allocations, launch groups, advance rounds and record permanent losses.':'Reference original CAP and Strike strength without new readiness or losses.'}</p></div><div class="card"><span class="num">03 / PROTECT</span><strong>Save / undo</strong><p>Changes auto-save in the browser where allowed; export a JSON battle backup for safety.</p></div></div></div>`;}
+function builderPage(){return `<div class="hero"><div class="panel"><div class="eyebrow">Step 1 / Build</div><h2>Use the existing Fleet Builder</h2><p class="muted">Keep building and validating fleets in WarLore/Type37's existing tool. Download its JSON export, then load it here as a new battle.</p><div class="flowline"><div class="stage"><b>Build</b><span>Original builder</span></div><span class="arrow">→</span><div class="stage"><b>Export JSON</b><span>Fleets menu</span></div><span class="arrow">→</span><div class="stage"><b>Import here</b><span>Start battle</span></div></div><div class="builder-actions"><a class="btn primary" target="_blank" rel="noopener noreferrer" href="https://type37.github.io/pacific-command-builder/">Open Fleet Builder ↗</a>${btn('↑ Import fleet JSON','open-fleet-file','','')}${btn('Try sample fleet','demo','','quiet')}</div><p class="note">Builder instructions: open <b>Fleet</b> → <b>Export file</b>, then choose that .json file here. This does not change the original builder.</p></div><div class="panel"><div class="eyebrow">Step 2 / Configure</div><h2>Assign aircraft to carriers</h2><p class="muted">The builder pools fighter and bomber Formations by task force. This companion spreads them across individual carriers automatically. In enhanced modes, you can adjust those allocations before combat.</p><div class="callout">${ENHANCED_AIR?'Each carrier has fixed <b>CAP</b>, <b>Escort</b> and <b>Strike</b> groups. CAP flies for two rounds; Escort and Strike fly for one. All then refuel/rearm for one round.':'Original game aircraft mechanics remain unchanged; no new CAP/Strike cycles or permanent-loss tracking.'}</div><h3>Continue a previous game</h3><div class="builder-actions">${btn('↑ Import battle backup','open-battle-file','','')}${battle?btn('Share / Save backup','share-battle','','quiet'):''}${battle?btn('Reset from original fleet','reset-battle','','quiet'):''}</div></div></div><div class="panel" style="margin-top:16px"><div class="sectionhead"><h2>Implementation path</h2><span class="badge gray">Prototype v0.4.2 · ${MODE_INFO[MODE].title}</span></div><div class="guide"><div class="card"><span class="num">01 / FLEET</span><strong>Ship losses and guns / AA</strong><p>${IS_EXPERIMENTAL?'Cumulative experimental damage tracks for capital ships; destroyers are targetable.':CUMULATIVE_ARMOUR?'Cumulative confirmed hits against armour; original confirmed/unconfirmed allocation and destroyer screening.':'Original hit allocation and sinking rules; destroyers remain targetable.'}</p></div><div class="card"><span class="num">02 / AVIATION</span><strong>${ENHANCED_AIR?'Carrier readiness and losses':'Published air combat'}</strong><p>${ENHANCED_AIR?'Set aircraft allocations, launch groups, advance rounds and record permanent losses.':'Reference original CAP and Strike strength without new readiness or losses.'}</p></div><div class="card"><span class="num">03 / PROTECT</span><strong>Save / undo</strong><p>Changes auto-save in the browser where allowed; export a JSON battle backup for safety.</p></div></div></div>`;}
 function miniStat(k,v,detail=''){return `<div class="mini-stat metric-${k.toLowerCase().replace(/[^a-z0-9]+/g,'-')}"><div class="k">${k}</div><div class="v">${v}</div>${detail?`<div class="small muted">${detail}</div>`:''}</div>`;}
 function statsStrip(){const st=grandTotals();return `<div class="statgrid"><div class="stat emph"><div class="k">Round</div><div class="v">${battle.round}</div><div class="s">Active battle</div></div>${[['Guns',st.guns,'All task forces'],['AA',st.aa,'All task forces'],['Major ships afloat',st.remaining,`of ${st.ships} tracked`],ENHANCED_AIR?['CAP aloft',st.cap,'On station / low fuel']:['CAP',st.cap,'Original fleet value']].map(([k,v,s])=>`<div class="stat metric-${k.toLowerCase().replace(/[^a-z0-9]+/g,'-')}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('')}</div>`;}
 function damagePips(n,max){return `<div class="track" aria-label="Damage ${n} of ${max}">${Array.from({length:Math.min(20,max)},(_,i)=>`<span class="pip ${i<n?'hit':''}"></span>`).join('')}</div>`;}
@@ -520,7 +571,7 @@ function fleetPage(){
   }).join('')}<div class="callout">${IS_EXPERIMENTAL?'<b>Experimental:</b> confirmed (6) = 2 damage; unconfirmed (4–5) = 1; cumulative ship hull points and hangar fire +2 on the first confirmed hit while Strike is Refuel/Rearm.':CUMULATIVE_ARMOUR?'<b>Enhanced armour house rule:</b> Each confirmed hit (6) removes 1 armour point, accumulating across attacks. Confirmed hits go to the attacker for allocation; unconfirmed hits (4–5) go to the defender and may sink any vessel, including destroyers. Guns and AA update only when a ship sinks.':'<b>Original ship combat:</b> Keep published sinking and Armoured thresholds within each attack. Confirmed hits go to the attacker; unconfirmed hits go to the defender, including destroyers. Guns and AA update when sunk.'} Historical class and model labels are for matching physical miniatures; they do not alter combat statistics.</div>`;
 }
 function availableAircraft(a,group){const g=a.groups;return group==='strike'?a.bombers-g.strike.count:a.fighters-g.cap.count-g.escort.count;}
-function renderGroupRow(s,ti,si,group){const g=s.air.groups[group],cap=group==='cap';const states=cap?['ready','air1','air2','rearm']:['ready','air1','rearm'];return `<div class="squadronrow group-${group}"><div><div class="group-type">${LABELS[group]}</div><small>${group==='cap'?'Defensive fighters · 2 rounds':group==='escort'?'Fighter escort · 1 round':'Bombers · 1 round'}</small></div><div class="count">${btn('−','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="-1" ${g.count===0||g.status!=='ready'?'disabled':''}`,'sm') }<b>${g.count}</b>${btn('+','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="1" ${availableAircraft(s.air,group)<=0||g.status!=='ready'?'disabled':''}`,'sm')}</div><div class="states">${states.map(st=>`<button class="state status-${st} group-${group} ${g.status===st?'active':''}" data-action="status" data-tf="${ti}" data-idx="${si}" data-group="${group}" data-value="${st}">${statusLabel(st,group)}</button>`).join('')}</div><div class="lossbox">${btn('−1 lost','lose-squadron',`data-tf="${ti}" data-idx="${si}" data-group="${group}" ${g.count<=0?'disabled':''}`,'xs danger')}</div></div>`;}
+function renderGroupRow(s,ti,si,group){const g=s.air.groups[group],cap=group==='cap';const states=cap?['ready','air1','air2','rearm']:['ready','air1','rearm'];return `<div class="squadronrow group-${group}"><div><div class="group-type">${LABELS[group]}</div><small>${group==='cap'?'Defensive fighters · 2 rounds':group==='escort'?'Fighter escort · 1 round':'Bombers · 1 round'}</small></div><div class="count">${btn('−','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="-1" ${g.count===0||g.status!=='ready'?'disabled':''}`,'sm') }<b>${g.count}</b>${btn('+','group-count',`data-tf="${ti}" data-idx="${si}" data-group="${group}" data-dir="1" ${availableAircraft(s.air,group)<=0||g.status!=='ready'?'disabled':''}`,'sm')}</div><div class="states">${states.map(st=>`<button class="state status-${st} group-${group} ${g.status===st?'active':''}" data-action="status" data-tf="${ti}" data-idx="${si}" data-group="${group}" data-value="${st}">${statusLabel(st,group)}</button>`).join('')}</div><div class="lossbox">${btn('−1 lost','lose-Formation',`data-tf="${ti}" data-idx="${si}" data-group="${group}" ${g.count<=0?'disabled':''}`,'xs danger')}</div></div>`;}
 function carrierTaskForceBanner(tf){
   const total=carriers(tf).length, active=currentCarriers(tf).length;
   return `<div class="carrier-tf-banner">
@@ -550,18 +601,18 @@ function carrierPage(){
       }).join('');
   }
  const cs=allCarriers();if(!cs.length)return '<div class="panel empty">This fleet has no aircraft carriers.</div>';
- return `<div class="sectionhead"><div><h2>Hidden carrier operations</h2><span class="note">Keep this screen private. Aircraft totals reflect surviving, ready and committed squadrons.</span></div>${btn('⇧ Advance round','advance-round','','primary')}</div>
+ return `<div class="sectionhead"><div><h2>Hidden carrier operations</h2><span class="note">Keep this screen private. Aircraft totals reflect surviving, ready and committed Formations.</span></div>${btn('⇧ Advance round','advance-round','','primary')}</div>
  <div class="callout"><b>Enhanced air combat sequence:</b> CAP intercepts on <b>5–6</b> → Escorts cancel CAP successes on <b>5–6</b> → AA neutralises Strike on <b>6</b> → remaining Strike scores ship hits on <b>4–6</b>. For each aircraft neutralised, roll for a permanent loss on <b>5–6</b> (33%). Record losses against the owning carrier below. Scenario modifiers still apply.</div>
  ${battle.tfs.map((tf,ti)=>{
   const found=tf.ships.map((s,si)=>({s,si})).filter(({s})=>s.air);
   if(!found.length)return '';
-  return `${carrierTaskForceBanner(tf)}${airSummary(tf)}<div class="note" style="margin:5px 0 10px">Unassigned fighter squadrons: ${tf.pool.fighters} · bombers: ${tf.pool.bombers}</div>${found.map(({s,si})=>{
+  return `${carrierTaskForceBanner(tf)}${airSummary(tf)}<div class="note" style="margin:5px 0 10px">Unassigned fighter Formations: ${tf.pool.fighters} · bombers: ${tf.pool.bombers}</div>${found.map(({s,si})=>{
     const a=s.air,ko=isKo(s),reservedF=a.fighters-a.groups.cap.count-a.groups.escort.count,reservedB=a.bombers-a.groups.strike.count;
     const capStatus=statusLabel(a.groups.cap.status,'cap');
     const capRecovery=a.groups.cap.status==='air1';
-    return `<section class="panel carrier-card ${ko?'low':''}"><div class="carrierhead"><div><div class="eyebrow">${vText(CLASSES[s.classId].short)} · ${s.capacity} squadron capacity</div><h3>${vText(s.name)}</h3><span class="note">${IS_EXPERIMENTAL?`${s.damage}/${s.ko} ship damage · `:''}${ko?'Out of action — air groups unavailable':'Operational'}${s.historicalClass?` · ${vText(s.historicalClass)}`:''}</span></div><div class="carrier-stats"><div class="chip fighter-chip"><b>${a.fighters}</b><span>Fighters surviving</span></div><div class="chip bomber-chip"><b>${a.bombers}</b><span>Bombers surviving</span></div><div class="chip reserve-chip"><b>${reservedF}</b><span>Reserve fighters</span></div><div class="chip reserve-chip"><b>${reservedB}</b><span>Reserve bombers</span></div></div></div>${ko?'<div class="callout warning">Carrier knocked out. Its Guns, AA and aircraft strength no longer contribute.</div>':`
+    return `<section class="panel carrier-card ${ko?'low':''}"><div class="carrierhead"><div><div class="eyebrow">${vText(CLASSES[s.classId].short)} · ${s.capacity} Formation capacity</div><h3>${vText(s.name)}</h3><span class="note">${IS_EXPERIMENTAL?`${s.damage}/${s.ko} ship damage · `:''}${ko?'Out of action — air groups unavailable':'Operational'}${s.historicalClass?` · ${vText(s.historicalClass)}`:''}</span></div><div class="carrier-stats"><div class="chip fighter-chip"><b>${a.fighters}</b><span>Fighters surviving</span></div><div class="chip bomber-chip"><b>${a.bombers}</b><span>Bombers surviving</span></div><div class="chip reserve-chip"><b>${reservedF}</b><span>Reserve fighters</span></div><div class="chip reserve-chip"><b>${reservedB}</b><span>Reserve bombers</span></div></div></div>${ko?'<div class="callout warning">Carrier knocked out. Its Guns, AA and aircraft strength no longer contribute.</div>':`
       <div class="deckbox deck-free"><div><b>Flight Operations</b><div class="note">CAP: ${vText(capStatus)}. Each Ready group may launch this round, even alongside other groups. Low Fuel CAP does not block strikes.</div></div><div class="launch-actions">${btn('Launch CAP','launch-group',`data-tf="${ti}" data-idx="${si}" data-group="cap" ${a.groups.cap.status!=='ready'||a.groups.cap.count===0?'disabled':''}`,'xs')}${btn('Launch Strike + Escort','launch-group',`data-tf="${ti}" data-idx="${si}" data-group="strike" ${a.groups.strike.status!=='ready'||a.groups.strike.count===0?'disabled':''}`,'xs primary')}${btn('Launch Escort only','launch-group',`data-tf="${ti}" data-idx="${si}" data-group="escort" ${a.groups.escort.status!=='ready'||a.groups.escort.count===0?'disabled':''}`,'xs')}${capRecovery?btn('Recover CAP early','recover-cap',`data-tf="${ti}" data-idx="${si}"`,'xs caution'):''}</div></div>
-      <div class="squadron-table">${GROUPS.map(g=>renderGroupRow(s,ti,si,g)).join('')}</div><div class="builder-actions"><span class="small muted" style="align-self:center">${battle.started?'Aircraft transfers between carriers are locked after battle starts.':'Pre-battle carrier squadron assignment:'}</span>${btn('− Fighter','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="fighters" data-dir="-1" ${battle.started||a.fighters===0?'disabled':''}`,'xs')}${btn('+ Fighter','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="fighters" data-dir="1" ${battle.started||tf.pool.fighters===0||a.fighters+a.bombers>=s.capacity?'disabled':''}`,'xs')}${btn('− Bomber','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="bombers" data-dir="-1" ${battle.started||a.bombers===0?'disabled':''}`,'xs')}${btn('+ Bomber','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="bombers" data-dir="1" ${battle.started||tf.pool.bombers===0||a.fighters+a.bombers>=s.capacity?'disabled':''}`,'xs')}${reservedF?btn('Lose reserve fighter','lose-reserve',`data-tf="${ti}" data-idx="${si}" data-kind="fighters"`,'xs danger'):''}${reservedB?btn('Lose reserve bomber','lose-reserve',`data-tf="${ti}" data-idx="${si}" data-kind="bombers"`,'xs danger'):''}</div>`}</section>`;
+      <div class="Formation-table">${GROUPS.map(g=>renderGroupRow(s,ti,si,g)).join('')}</div><div class="builder-actions"><span class="small muted" style="align-self:center">${battle.started?'Aircraft transfers between carriers are locked after battle starts.':'Pre-battle carrier Formation assignment:'}</span>${btn('− Fighter','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="fighters" data-dir="-1" ${battle.started||a.fighters===0?'disabled':''}`,'xs')}${btn('+ Fighter','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="fighters" data-dir="1" ${battle.started||tf.pool.fighters===0||a.fighters+a.bombers>=s.capacity?'disabled':''}`,'xs')}${btn('− Bomber','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="bombers" data-dir="-1" ${battle.started||a.bombers===0?'disabled':''}`,'xs')}${btn('+ Bomber','pool-change',`data-tf="${ti}" data-idx="${si}" data-kind="bombers" data-dir="1" ${battle.started||tf.pool.bombers===0||a.fighters+a.bombers>=s.capacity?'disabled':''}`,'xs')}${reservedF?btn('Lose reserve fighter','lose-reserve',`data-tf="${ti}" data-idx="${si}" data-kind="fighters"`,'xs danger'):''}${reservedB?btn('Lose reserve bomber','lose-reserve',`data-tf="${ti}" data-idx="${si}" data-kind="bombers"`,'xs danger'):''}</div>`}</section>`;
   }).join('')}`;
  }).join('')}
  <div class="callout"><b>CAP:</b> Ready → On Station → Low Fuel → Refuel/Rearm → Ready. <b>Escort / Strike:</b> Ready → Airborne → Refuel/Rearm → Ready. <b>Launches:</b> CAP, Strike and Escort can launch in the same round, even with Low Fuel CAP. <b>Early CAP recovery:</b> choose Recover CAP early while On Station, after resolving that round’s CAP; CAP spends the next round refuelling and is Ready the round after. No deck-congestion restrictions. Manually changing a status is a correction, not a new mission. <b>Loss check:</b> neutralised bombers and engaged fighters are permanently lost on 5–6.</div>`;
@@ -614,7 +665,7 @@ function dispatch(el){const action=data(el,'action');if(!action)return;
     case 'pool-change':modifyPool(ti,idx,data(el,'kind'),Number(data(el,'dir')));break;
     case 'group-count':adjustGroup(ti,idx,group,Number(data(el,'dir')));break;
     case 'status':changeStatus(ti,idx,group,v);break;
-    case 'lose-squadron':loseSquadron(ti,idx,group);break;
+    case 'lose-Formation':loseSquadron(ti,idx,group);break;
     case 'lose-reserve':loseReserve(ti,idx,data(el,'kind'));break;
   }
 }
