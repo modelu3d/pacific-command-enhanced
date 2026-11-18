@@ -1,4 +1,4 @@
-# Pacific Command Enhanced — Game Modes v0.4.2
+# Pacific Command Enhanced — Game Modes v0.5
 
 An **unofficial, independent playtest companion** for *Pacific Command*. The app imports JSON exported by the [original Type37/WarLore Fleet Builder](https://type37.github.io/pacific-command-builder/); no original builder code is embedded.
 
@@ -12,6 +12,19 @@ An **unofficial, independent playtest companion** for *Pacific Command*. The app
 
 At the root URL, choose a mode. Each stores its own browser save under a distinct key and exports backups tagged with its mode. Cross-mode battle-backup imports are blocked to avoid applying the wrong rules. **Import the same original Fleet Builder JSON independently into each mode** to compare game types.
 
+
+### v0.5 — iPad carrier command and bomber formations
+
+- **Carrier Overview** (default in Enhanced Aircraft and Experimental): one compact row per carrier, grouped under prominent TF headings. Each row shows fighters/bombers, CAP, Escort, Strike and their Ready/On Station/Low Fuel/Refuel states.
+- **Task-force air totals:** combined CAP, available and airborne Escort/Strike; Strike includes Dive and Torpedo totals.
+- **Tap a carrier row** to open just that carrier's detailed operations. The **Details** control opens all carriers; **Overview** returns to the fleet overview.
+- **Fit iPad / Exit focus:** hides unrelated website navigation and extended rule notes to fit two-to-four carriers on a landscape iPad screen. In landscape on a touch device, focus is enabled automatically. Larger fleets may need a task-force filter or scrolling.
+- **Formations** replaces the historical misnomer 'squadrons' in game-facing aircraft labels. One Formation is one game-strength die; original JSON names such as `fighter-sqn` and `bomber-sqn` are preserved for importing fleets.
+- **Dive / Torpedo Bomber slider:** set a carrier's bomber composition during pre-battle setup. Default is approximately 75% Dive / 25% Torpedo (e.g. eight bomber Formations = six Dive, two Torpedo). One Strike group and one readiness cycle are retained. Composition is locked after the battle begins.
+- **Permanent losses** can be recorded against Dive or Torpedo Formations separately, and the game totals update accordingly.
+- In enhanced aviation modes, when the **Unreliable Torpedoes** fleet modifier is present, apply its confirmed-hit reroll only to the Torpedo Bomber dice. This is an experimental change, not the published rules (which affect the entire Strike).
+- Original ship combat, targeting, and aircraft rules remain unchanged in **Original Rules**. Enhanced Aircraft retains the cumulative armour house rule; Experimental retains its separate hull damage mechanic.
+- Existing v0.4 battle JSON saves and browser state remain compatible. The storage keys and backup format have not changed.
 
 ### v0.4.2 — Carrier Operations headings
 
