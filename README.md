@@ -1,4 +1,4 @@
-# Pacific Command Enhanced — Game Modes v0.4.1
+# Pacific Command Enhanced — Game Modes v0.4.2
 
 An **unofficial, independent playtest companion** for *Pacific Command*. The app imports JSON exported by the [original Type37/WarLore Fleet Builder](https://type37.github.io/pacific-command-builder/); no original builder code is embedded.
 
@@ -11,6 +11,11 @@ An **unofficial, independent playtest companion** for *Pacific Command*. The app
 | `/experimental/` | v0.3's *experimental* cumulative hull damage, knockouts and Hangar Fire | Same enhanced aircraft operations |
 
 At the root URL, choose a mode. Each stores its own browser save under a distinct key and exports backups tagged with its mode. Cross-mode battle-backup imports are blocked to avoid applying the wrong rules. **Import the same original Fleet Builder JSON independently into each mode** to compare game types.
+
+
+### v0.4.2 — Carrier Operations headings
+
+Carrier Operations now presents a prominent heading for every task force, including its persistent TF identifier, editable display name, and surviving-carrier count. The heading is formatted for desktop and iPad. This is a visual-only update; the aircraft rules, save formats and existing battle backups are unchanged.
 
 ### Matching physical models
 
