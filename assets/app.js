@@ -54,6 +54,7 @@ const MOD_NAMES={
 };
 let battle=null, undoStack=[], tab='builder', modal=null, notice='', storageOk=true;
 let carrierView='overview', carrierFocus=!!window.matchMedia?.('(pointer: coarse) and (orientation: landscape)')?.matches, selectedCarrier=null, overviewTF='all';
+const fleetExpandedTFs=new Set();
 const clone=(v)=>JSON.parse(JSON.stringify(v));
 const escapeHtml=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeId=(s)=>String(s).replace(/[^a-zA-Z0-9_-]/g,'');
@@ -259,13 +260,13 @@ function importFleet(fleet){
   try{
     const next=makeBattle(fleet);
     if(battle && !confirm('Start a new battle? Your current battle will be replaced. Export it first if you want to keep a backup.'))return;
-    battle=next;undoStack=[];tab='fleet';notice='Fleet imported. Check carrier Formation assignments before beginning.';persist();render();
+    battle=next;undoStack=[];fleetExpandedTFs.clear();tab='fleet';notice='Fleet imported. Check carrier Formation assignments before beginning.';persist();render();
   }catch(e){alert('Import failed: '+e.message);}
 }
 function importBattle(data){
   const upgraded=normalizeBattle(clone(data));
   if(battle&&!confirm('Replace the current battle with this saved battle?'))return;
-  battle=upgraded;undoStack=[];tab='fleet';notice='Battle backup restored';persist();render();
+  battle=upgraded;undoStack=[];fleetExpandedTFs.clear();tab='fleet';notice='Battle backup restored';persist();render();
 }
 function backupName(){return `PCE_${MODE}_${battle.name}_round_${battle.round}.json`.replace(/[^A-Za-z0-9_.-]+/g,'_');}
 function download(data,filename){const a=document.createElement('a');const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);a.href=url;a.download=filename.replace(/[^A-Za-z0-9_.-]+/g,'_');document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);}
@@ -562,8 +563,10 @@ function renderScreenRow(sc,ti,si){const c=cls(sc),tf=getTF(ti),can=tf.pending.c
 function fleetPage(){
   if(!battle)return emptyPage();
   const modBlock=battle.mods.length?`<div class="panel mods-panel"><span class="eyebrow">Fleet modifications</span><div class="specials">${battle.mods.map(m=>`<span class="special-chip">${escapeHtml(MOD_NAMES[m]||m)}</span>`).join('')}</div>${!IS_EXPERIMENTAL&&(battle.mods.includes('improved-armour')||battle.mods.includes('torpedo-belts'))?'<div class="note">Class-specific armour modifiers: verify the selected ship class in the original builder and apply any increase manually; the companion does not guess which class was selected.</div>':''}</div>`:'';
-  return `${statsStrip()}${modBlock}${battle.tfs.map((tf,ti)=>{
-    const t=tfTotals(tf),pending=tf.pending.confirmed+tf.pending.unconfirmed;
+  return `${statsStrip()}<div class="fleet-rollup-toolbar"><span>Task forces · tap a heading to expand its ship list</span><div>${btn('Expand all','expand-all-tfs','','xs quiet')}${btn('Collapse all','collapse-all-tfs','','xs quiet')}</div></div>${modBlock}${battle.tfs.map((tf,ti)=>{
+    const t=tfTotals(tf),pending=tf.pending.confirmed+tf.pending.unconfirmed,expanded=fleetExpandedTFs.has(ti);
+    const vessels=tf.ships.filter(s=>!isKo(s)).length+tf.screens.reduce((total,sc)=>total+sc.remaining,0);
+    const initialVessels=tf.ships.length+tf.screens.reduce((total,sc)=>total+sc.initial,0);
     return `<section class="panel tf tf-${ti%3}"><div class="tf-head"><div><div class="eyebrow">${vText(tf.id)}</div><h2>${vText(tf.name)} ${btn('Rename','rename-tf',`data-tf="${ti}"`,'xs quiet')}</h2>${tf.commander?`<div class="note">${vText(tf.commander)}</div>`:''}</div><div class="tf-stats">${miniStat('Guns',t.guns)}${miniStat('AA',t.aa)}${ENHANCED_AIR?miniStat('CAP aloft',t.cap):miniStat('CAP',t.cap)}${ENHANCED_AIR?miniStat('Strike airborne',t.strike):miniStat('Strike',t.strike)}</div></div>
     ${!IS_EXPERIMENTAL?`<div class="hit-pool-panel"><div><b>${CUMULATIVE_ARMOUR?'Cumulative armour · house rule':'Published ship hit allocation'}</b><div class="note">6 = confirmed, allocated by attacker. 4–5 = unconfirmed, allocated by defender. One unconfirmed hit sinks any ship, including armoured ships. ${CUMULATIVE_ARMOUR?'Each confirmed hit removes one point of armour and persists across attacks.':'An Armoured ship needs its full confirmed-hit threshold within one attack.'}</div></div>${btn('Record attack hits','open-hit-pool',`data-tf="${ti}" ${pending?'disabled':''}`,'sm primary')}</div>`:''}
     ${pending?`<div class="callout warning"><b>${pending} unallocated hits:</b> ${tf.pending.confirmed} confirmed (attacker) + ${tf.pending.unconfirmed} unconfirmed (defender). ${IS_EXPERIMENTAL?'Assign to another declared target with Target / hits.':'Assign each hit below using the corresponding button. Destroyers are eligible for unconfirmed hits.'} ${btn('Discard unallocated hits','clear-pending',`data-tf="${ti}"`,'xs')}</div>`:''}
@@ -697,6 +700,9 @@ function dispatch(el){const action=data(el,'action');if(!action)return;
   const ti=data(el,'tf'),idx=data(el,'idx'),group=data(el,'group'),v=data(el,'value');
   switch(action){
     case 'tab':tab=v;notice='';render();break;
+    case 'toggle-fleet-tf':{const index=Number(ti);if(fleetExpandedTFs.has(index))fleetExpandedTFs.delete(index);else fleetExpandedTFs.add(index);render();break;}
+    case 'expand-all-tfs':battle?.tfs?.forEach((tf,index)=>fleetExpandedTFs.add(index));render();break;
+    case 'collapse-all-tfs':fleetExpandedTFs.clear();render();break;
     case 'carrier-overview':carrierView='overview';selectedCarrier=null;render();break;
     case 'carrier-details':carrierView='detail';selectedCarrier=null;render();break;
     case 'open-carrier':{const t=Number(ti),n=Number(idx);selectedCarrier=selectedCarrier?.ti===t&&selectedCarrier?.si===n?null:{ti:t,si:n};carrierView='overview';render();break;}
@@ -735,7 +741,7 @@ function dispatch(el){const action=data(el,'action');if(!action)return;
     case 'lose-reserve':loseReserve(ti,idx,data(el,'kind'));break;
   }
 }
-function importFleetWithoutPrompt(raw){try{battle=makeBattle(raw);undoStack=[];tab='fleet';notice='Battle reset to original fleet.';persist();render();}catch(e){alert('Reset failed: '+e.message);}}
+function importFleetWithoutPrompt(raw){try{battle=makeBattle(raw);undoStack=[];fleetExpandedTFs.clear();tab='fleet';notice='Battle reset to original fleet.';persist();render();}catch(e){alert('Reset failed: '+e.message);}}
 document.addEventListener('click',(ev)=>{
   if(ev.target.classList.contains('modal-wrap')){dismiss();return;}
   const button=ev.target.closest('[data-action]');if(!button||button.disabled)return;ev.preventDefault();dispatch(button);
