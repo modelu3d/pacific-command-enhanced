@@ -1,4 +1,4 @@
-# Pacific Command Enhanced — Game Modes v0.5.1
+# Pacific Command Enhanced — Game Modes v0.5.2
 
 An **unofficial, independent playtest companion** for *Pacific Command*. The app imports JSON exported by the [original Type37/WarLore Fleet Builder](https://type37.github.io/pacific-command-builder/); no original builder code is embedded.
 
@@ -12,6 +12,14 @@ An **unofficial, independent playtest companion** for *Pacific Command*. The app
 
 At the root URL, choose a mode. Each stores its own browser save under a distinct key and exports backups tagged with its mode. Cross-mode battle-backup imports are blocked to avoid applying the wrong rules. **Import the same original Fleet Builder JSON independently into each mode** to compare game types.
 
+
+### v0.5.2 — Collapsible Fleet task forces and stronger headings
+
+- Fleet Overview now displays prominent, collapsible **task-force headings**. Tap a TF header to reveal or hide its ship and damage controls without navigating away. **Expand all** and **Collapse all** controls are also available.
+- Each header keeps live totals visible while collapsed: **Guns, AA, CAP, Strike**, surviving vessel count, and a prominent unallocated-hits warning when needed.
+- Carrier Operations task-force headers and Fleet header typography and contrast have been enlarged so the important totals and task-force identity stand apart from the detailed rows beneath.
+- Task-force expansion is a display preference, reset when a different fleet is loaded. It doesn't change battle data or the saved game format.
+- This release makes **no combat mechanic changes**. Physical carrier boards and token-based flight-state tracking remain a separate proposal pending tabletop testing.
 
 ### v0.5.1 — Inline carrier expand/collapse
 
