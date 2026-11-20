@@ -247,3 +247,64 @@ body.carrier-focus .inline-detail-heading{position:sticky;top:-10px;z-index:2;ba
  .overview-expander{width:13px;font-size:15px}
  .inline-detail-heading strong{font-size:12px}
 }
+
+
+/* v0.5.2 — prominent task-force rollups on Fleet and Carrier pages */
+.fleet-rollup-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:6px 0 15px;color:#b5cad7;font-size:12px;font-weight:650}
+.fleet-rollup-toolbar>div{display:flex;gap:6px}
+.fleet-rollup-panel{padding:0!important;overflow:hidden;border:1px solid #506d80!important;border-top:4px solid #e2c991!important;border-radius:13px;margin:0 0 14px!important}
+.fleet-rollup-panel.tf-1{border-top-color:#a1b4e5!important}
+.fleet-rollup-panel.tf-2{border-top-color:#79c9a9!important}
+.fleet-rollup-wrap{display:flex;align-items:stretch;gap:0;background:linear-gradient(105deg,#2a4c62,#1a3449 65%,#142938)}
+.fleet-rollup-toggle{flex:1;min-width:0;border:0;border-left:5px solid #e2c991;background:transparent;color:#f0f5f7;display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:15px 14px;text-align:left;min-height:92px;cursor:pointer}
+.fleet-rollup-panel.tf-1 .fleet-rollup-toggle{border-left-color:#a1b4e5}
+.fleet-rollup-panel.tf-2 .fleet-rollup-toggle{border-left-color:#79c9a9}
+.fleet-rollup-toggle:hover{background:rgba(130,173,192,.12)}
+.fleet-rollup-toggle:focus-visible{outline:3px solid #e8cb8f;outline-offset:-4px}
+.fleet-rollup-panel.fleet-open .fleet-rollup-toggle{background:linear-gradient(95deg,#345770,#1d3a50)}
+.fleet-rollup-chevron{font-size:23px;color:#eccf94;width:17px;flex:none;line-height:1}
+.fleet-rollup-id{display:inline-flex;align-items:center;justify-content:center;flex:none;font-size:19px;font-weight:900;letter-spacing:.06em;color:#162d3e;background:#e2c991;padding:9px 11px;border-radius:8px;font-variant-numeric:tabular-nums}
+.fleet-rollup-identity{display:flex;flex-direction:column;gap:3px;min-width:180px;flex:1 1 240px}
+.fleet-rollup-identity>strong{font-size:clamp(20px,2.5vw,26px);line-height:1.15;font-weight:850;color:#f7f8fa;overflow-wrap:anywhere}
+.fleet-rollup-subtitle{font-size:12px;color:#c2d2dc;line-height:1.2}
+.fleet-rollup-metrics{display:grid;grid-template-columns:repeat(4,minmax(70px,1fr));flex:0 1 365px;gap:6px}
+.fleet-rollup-metric{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:rgba(9,24,38,.48);border:1px solid #557284;padding:8px 7px;border-radius:7px}
+.fleet-rollup-metric b{font-size:24px;line-height:1;font-weight:850;color:#f0d39e;font-variant-numeric:tabular-nums}
+.fleet-rollup-metric small{font-size:10px;line-height:1.1;text-transform:uppercase;font-weight:750;letter-spacing:.08em;color:#bdd1dd}
+.fleet-rollup-pending{flex:none;border-radius:7px;padding:8px 11px;color:#ffddd2;background:#743e39;font-size:12px;font-weight:850}
+.fleet-rollup-utilities{display:flex;align-items:center;border-left:1px solid #476377;padding:0 10px}
+.fleet-rollup-content{padding:16px 19px 19px;background:#111e2bf2;border-top:1px solid #4d6879}
+.fleet-rollup-content[hidden]{display:none!important}
+.fleet-rollup-content .fleettable{font-size:13px}
+.fleet-rollup-content .hit-pool-panel{margin-bottom:13px}
+/* Keep task-force identity markedly stronger than the carrier rows below it */
+.carrier-overview-tf{border-color:#56788e}
+.overview-tf-bar{background:linear-gradient(108deg,#385b72,#203f55 68%,#173247);border-left-width:6px;border-bottom:1px solid #638093;padding:13px 16px;box-shadow:inset 0 -1px rgba(255,255,255,.08)}
+.overview-tf-id{font-size:19px;padding:7px 11px}
+.overview-tf-name{font-size:clamp(20px,2.25vw,25px);line-height:1.12;font-weight:850}
+.overview-tf-bar>span{font-size:12px;font-weight:700;color:#e0ebf0}
+.overview-ship b{font-size:16px}
+.carrier-overview-row[aria-expanded="true"] .overview-ship b{color:#fff0c7}
+body.carrier-focus .overview-tf-bar{padding:9px 12px}
+body.carrier-focus .overview-tf-id{font-size:17px;padding:5px 9px}
+body.carrier-focus .overview-tf-name{font-size:20px}
+body.carrier-focus .overview-ship b{font-size:15px}
+@media(max-width:850px){
+ .fleet-rollup-toggle{gap:9px;padding:12px;min-height:88px}
+ .fleet-rollup-identity{flex-basis:170px;min-width:135px}
+ .fleet-rollup-metrics{flex:1 1 100%;max-width:none}
+ .fleet-rollup-utilities{padding:0 7px}
+ .fleet-rollup-content{padding:11px}
+}
+@media(max-width:540px){
+ .fleet-rollup-toggle{gap:8px}
+ .fleet-rollup-id{font-size:15px;padding:7px 9px}
+ .fleet-rollup-identity>strong{font-size:19px}
+ .fleet-rollup-metric b{font-size:20px}
+ .fleet-rollup-metric small{font-size:9px}
+ .fleet-rollup-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+ .overview-tf-bar{padding:10px 9px}
+ .overview-tf-id{font-size:16px;padding:6px 7px}
+ .overview-tf-name{font-size:18px}
+ .overview-tf-bar>span{font-size:10px}
+}
