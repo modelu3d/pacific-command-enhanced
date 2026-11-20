@@ -567,10 +567,26 @@ function fleetPage(){
     const t=tfTotals(tf),pending=tf.pending.confirmed+tf.pending.unconfirmed,expanded=fleetExpandedTFs.has(ti);
     const vessels=tf.ships.filter(s=>!isKo(s)).length+tf.screens.reduce((total,sc)=>total+sc.remaining,0);
     const initialVessels=tf.ships.length+tf.screens.reduce((total,sc)=>total+sc.initial,0);
-    return `<section class="panel tf tf-${ti%3}"><div class="tf-head"><div><div class="eyebrow">${vText(tf.id)}</div><h2>${vText(tf.name)} ${btn('Rename','rename-tf',`data-tf="${ti}"`,'xs quiet')}</h2>${tf.commander?`<div class="note">${vText(tf.commander)}</div>`:''}</div><div class="tf-stats">${miniStat('Guns',t.guns)}${miniStat('AA',t.aa)}${ENHANCED_AIR?miniStat('CAP aloft',t.cap):miniStat('CAP',t.cap)}${ENHANCED_AIR?miniStat('Strike airborne',t.strike):miniStat('Strike',t.strike)}</div></div>
+    return `<section class="panel tf tf-${ti%3} fleet-rollup-panel ${expanded?'fleet-open':''}">
+      <div class="fleet-rollup-wrap">
+        <button type="button" class="fleet-rollup-toggle" data-action="toggle-fleet-tf" data-tf="${ti}" aria-expanded="${expanded}" aria-controls="fleet-tf-details-${ti}" aria-label="${expanded?'Collapse':'Expand'} ${vText(tf.id)} ${vText(tf.name)}">
+          <span class="fleet-rollup-chevron" aria-hidden="true">${expanded?'▾':'▸'}</span>
+          <span class="fleet-rollup-id">${vText(tf.id)}</span>
+          <span class="fleet-rollup-identity"><strong>${vText(tf.name)}</strong><span class="fleet-rollup-subtitle">${vessels}/${initialVessels} vessels remaining${tf.commander?` · ${vText(tf.commander)}`:''}</span></span>
+          <span class="fleet-rollup-metrics">
+            <span class="fleet-rollup-metric"><b>${t.guns}</b><small>Guns</small></span>
+            <span class="fleet-rollup-metric"><b>${t.aa}</b><small>AA</small></span>
+            <span class="fleet-rollup-metric"><b>${t.cap}</b><small>CAP</small></span>
+            <span class="fleet-rollup-metric"><b>${t.strike}</b><small>Strike</small></span>
+          </span>
+          ${pending?`<span class="fleet-rollup-pending">${pending} hits unallocated</span>`:''}
+        </button>
+        <div class="fleet-rollup-utilities">${btn('Rename','rename-tf',`data-tf="${ti}"`,'xs quiet')}</div>
+      </div>
+      <div class="fleet-rollup-content" id="fleet-tf-details-${ti}" ${expanded?'':'hidden'}>
     ${!IS_EXPERIMENTAL?`<div class="hit-pool-panel"><div><b>${CUMULATIVE_ARMOUR?'Cumulative armour · house rule':'Published ship hit allocation'}</b><div class="note">6 = confirmed, allocated by attacker. 4–5 = unconfirmed, allocated by defender. One unconfirmed hit sinks any ship, including armoured ships. ${CUMULATIVE_ARMOUR?'Each confirmed hit removes one point of armour and persists across attacks.':'An Armoured ship needs its full confirmed-hit threshold within one attack.'}</div></div>${btn('Record attack hits','open-hit-pool',`data-tf="${ti}" ${pending?'disabled':''}`,'sm primary')}</div>`:''}
     ${pending?`<div class="callout warning"><b>${pending} unallocated hits:</b> ${tf.pending.confirmed} confirmed (attacker) + ${tf.pending.unconfirmed} unconfirmed (defender). ${IS_EXPERIMENTAL?'Assign to another declared target with Target / hits.':'Assign each hit below using the corresponding button. Destroyers are eligible for unconfirmed hits.'} ${btn('Discard unallocated hits','clear-pending',`data-tf="${ti}"`,'xs')}</div>`:''}
-    <table class="fleettable"><thead><tr><th>Ship / miniature</th><th>Guns</th><th>AA</th><th>${IS_EXPERIMENTAL?'Damage / survivors':CUMULATIVE_ARMOUR?'Armour / survivors':'Status / survivors'}</th><th>Record action</th></tr></thead><tbody>${tf.ships.map((s,si)=>renderShipRow(s,ti,si)).join('')}${tf.screens.map((sc,si)=>renderScreenRow(sc,ti,si)).join('')}</tbody></table></section>`;
+    <table class="fleettable"><thead><tr><th>Ship / miniature</th><th>Guns</th><th>AA</th><th>${IS_EXPERIMENTAL?'Damage / survivors':CUMULATIVE_ARMOUR?'Armour / survivors':'Status / survivors'}</th><th>Record action</th></tr></thead><tbody>${tf.ships.map((s,si)=>renderShipRow(s,ti,si)).join('')}${tf.screens.map((sc,si)=>renderScreenRow(sc,ti,si)).join('')}</tbody></table></div></section>`;
   }).join('')}<div class="callout">${IS_EXPERIMENTAL?'<b>Experimental:</b> confirmed (6) = 2 damage; unconfirmed (4–5) = 1; cumulative ship hull points and hangar fire +2 on the first confirmed hit while Strike is Refuel/Rearm.':CUMULATIVE_ARMOUR?'<b>Enhanced armour house rule:</b> Each confirmed hit (6) removes 1 armour point, accumulating across attacks. Confirmed hits go to the attacker for allocation; unconfirmed hits (4–5) go to the defender and may sink any vessel, including destroyers. Guns and AA update only when a ship sinks.':'<b>Original ship combat:</b> Keep published sinking and Armoured thresholds within each attack. Confirmed hits go to the attacker; unconfirmed hits go to the defender, including destroyers. Guns and AA update when sunk.'} Historical class and model labels are for matching physical miniatures; they do not alter combat statistics.</div>`;
 }
 function availableAircraft(a,group){const g=a.groups;return group==='strike'?a.bombers-g.strike.count:a.fighters-g.cap.count-g.escort.count;}
